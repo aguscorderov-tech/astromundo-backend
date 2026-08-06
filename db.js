@@ -10,9 +10,16 @@
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fs from "node:fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, "astromundo.db");
+
+// Si la carpeta destino (ej. el volumen /data) todavía no existe o no está
+// montada cuando arranca el proceso, SQLite falla con "unable to open
+// database file" — esto se asegura de que exista antes de intentar abrirla.
+const dbDir = path.dirname(DB_PATH);
+try { fs.mkdirSync(dbDir, { recursive: true }); } catch (e) { /* ya existe, o no hace falta (ej. carpeta actual) */ }
 
 export const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
@@ -151,3 +158,10 @@ CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 export function newId(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
+  
+  
+  
+
+
+
+
