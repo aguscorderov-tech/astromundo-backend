@@ -13,6 +13,8 @@ import * as chartRoutes from "./routes/charts.js";
 import * as serviceRoutes from "./routes/services.js";
 import * as apptRoutes from "./routes/appointments.js";
 import * as paymentRoutes from "./routes/payments.js";
+import * as paymentSettingsRoutes from "./routes/paymentSettings.js";
+import * as orderRoutes from "./routes/orders.js";
 
 const PORT = process.env.PORT || 3001;
 
@@ -63,6 +65,7 @@ const server = createServer(async (req, res) => {
       if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, chartRoutes.listCharts(user, url.searchParams.get("clientId"))); return; }
       if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, chartRoutes.saveChart(user, await readJSONBody(req))); return; }
       if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, chartRoutes.getChart(user, parts[2])); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, chartRoutes.deleteChart(user, parts[2])); return; }
       if (parts.length === 4 && parts[3] === "interpretation" && req.method === "PUT") {
         const body = await readJSONBody(req);
         sendJSON(res, 200, chartRoutes.saveInterpretation(user, parts[2], body.text)); return;
@@ -93,6 +96,44 @@ const server = createServer(async (req, res) => {
       if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, paymentRoutes.listPayments(user)); return; }
       if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, paymentRoutes.createPayment(user, await readJSONBody(req))); return; }
       if (parts.length === 3 && parts[2] === "summary" && req.method === "GET") { sendJSON(res, 200, paymentRoutes.paymentsSummary(user)); return; }
+    }
+
+    // ---- /api/payment-settings (el astrólogo configura SUS credenciales de cobro) ----
+    if (parts[1] === "payment-settings") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, paymentSettingsRoutes.getSettings(user)); return; }
+      if (parts.length === 2 && req.method === "PUT") { sendJSON(res, 200, paymentSettingsRoutes.updateSettings(user, await readJSONBody(req))); return; }
+    }
+
+    // ---- /api/orders (el astrólogo ve sus órdenes / confirma transferencias) ----
+    if (parts[1] === "orders") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, orderRoutes.listOrders(user)); return; }
+      if (parts.length === 4 && parts[3] === "confirm-transfer" && req.method === "POST") {
+        sendJSON(res, 200, orderRoutes.confirmBankTransfer(user, parts[2])); return;
+      }
+    }
+
+    // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
+    if (parts[1] === "public") {
+      const baseUrl = `${url.protocol}//${req.headers.host}`;
+      if (parts[2] === "services" && parts.length === 4 && req.method === "GET") {
+        sendJSON(res, 200, orderRoutes.listPublicServices(parts[3])); return;
+      }
+      if (parts[2] === "orders" && parts.length === 4 && req.method === "POST") {
+        sendJSON(res, 201, await orderRoutes.createOrder(parts[3], await readJSONBody(req), baseUrl)); return;
+      }
+      if (parts[2] === "webhooks" && parts[3] === "mercadopago" && req.method === "POST") {
+        const body = await readJSONBody(req).catch(() => ({}));
+        await orderRoutes.handleMercadopagoWebhook(url.searchParams, req.headers, body);
+        sendJSON(res, 200, { received: true }); return; // siempre 200, MP reintenta si no
+      }
+      if (parts[2] === "webhooks" && parts[3] === "paypal" && parts[4] === "capture" && req.method === "GET") {
+        const result = await orderRoutes.capturePaypalOrder(url.searchParams.get("orderId"), url.searchParams.get("token"));
+        res.writeHead(302, { Location: `/reservar-gracias.html?status=${result.status}` });
+        res.end();
+        return;
+      }
     }
 
     sendJSON(res, 404, { error: "Ruta no encontrada." });

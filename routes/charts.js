@@ -41,3 +41,9 @@ export function saveInterpretation(user, chartId, text) {
   db.prepare("UPDATE charts SET interp_generated = 1, interp_text = ? WHERE id = ?").run(text, chart.id);
   return getChart(user, chartId);
 }
+
+export function deleteChart(user, chartId) {
+  const result = db.prepare("DELETE FROM charts WHERE id = ? AND user_id = ?").run(chartId, user.id);
+  if (result.changes === 0) throw new HttpError(404, "Carta no encontrada.");
+  return { deleted: true };
+}

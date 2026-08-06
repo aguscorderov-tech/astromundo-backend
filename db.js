@@ -106,12 +106,46 @@ CREATE TABLE IF NOT EXISTS payments (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS payment_settings (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  mp_access_token TEXT,
+  mp_public_key TEXT,
+  mp_webhook_secret TEXT,
+  paypal_client_id TEXT,
+  paypal_client_secret TEXT,
+  paypal_mode TEXT NOT NULL DEFAULT 'sandbox',
+  bank_name TEXT,
+  bank_alias TEXT,
+  bank_cbu TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Un "order" es un intento de compra desde la página pública de reserva —
+-- se crea en estado pending y pasa a approved recién cuando el webhook del
+-- proveedor (o la confirmación manual de transferencia) lo confirma. No se
+-- mezcla con payments (el historial ya confirmado) hasta ese momento.
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  service_id TEXT REFERENCES services(id) ON DELETE SET NULL,
+  client_name TEXT NOT NULL,
+  client_email TEXT,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'ARS',
+  payment_method TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  provider_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
 CREATE INDEX IF NOT EXISTS idx_appt_user ON appointments(user_id);
 CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 `);
 
 export function newId(prefix) {

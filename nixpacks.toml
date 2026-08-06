@@ -1,12 +1,2 @@
-# Config explícita — sin esto, Nixpacks tiene que "adivinar" la versión de
-# Node y el comando de arranque a partir del package.json, y ahí es donde
-# suelen fallar builds de proyectos chicos. Esto lo deja sin ambigüedad.
-
-[phases.setup]
-nixPkgs = ["nodejs_22"]
-
-[phases.install]
-cmds = ["npm install"]
-
 [start]
 cmd = "node server.js"
