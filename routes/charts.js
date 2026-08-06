@@ -37,6 +37,7 @@ export function saveChart(user, body) {
 }
 
 export function saveInterpretation(user, chartId, text) {
+  if (user.plan === "gratis") throw new HttpError(403, "La interpretación con IA es una función de los planes Pro y Premium.");
   const chart = getChart(user, chartId);
   db.prepare("UPDATE charts SET interp_generated = 1, interp_text = ? WHERE id = ?").run(text, chart.id);
   return getChart(user, chartId);
