@@ -1,3 +1,4 @@
+
 // server.js
 // Punto de entrada del backend. Un solo proceso Node, cero dependencias de
 // npm (usa node:http y node:sqlite, ambos nativos desde Node 22.5+).
@@ -34,7 +35,7 @@ const server = createServer(async (req, res) => {
     if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
 
     // ---- /api/health ----
-    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend" }); return; }
+    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "planes-v2" }); return; }
 
     // ---- /api/auth/* ----
     if (parts[1] === "auth") {
@@ -48,6 +49,11 @@ const server = createServer(async (req, res) => {
       }
       if (parts[2] === "me" && req.method === "GET") {
         sendJSON(res, 200, await authRoutes.me(req)); return;
+      }
+      if (parts[2] === "plan" && req.method === "PUT") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.updatePlan(user, body.plan)); return;
       }
     }
 
@@ -147,3 +153,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
 });
+    
+    
