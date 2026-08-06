@@ -1,0 +1,6 @@
+node_modules/
+astromundo.db
+astromundo.db-shm
+astromundo.db-wal
+*.log
+.env

@@ -1,0 +1,10 @@
+{
+  "name": "astromundo-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "engines": { "node": ">=22.5.0" },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "description": "Backend de Astromundo — cero dependencias externas (usa node:http y node:sqlite nativos)."
+}
