@@ -16,7 +16,6 @@ export async function register(body) {
   db.prepare("INSERT INTO users (id, email, password_hash, password_salt, name) VALUES (?, ?, ?, ?, ?)")
     .run(id, email.toLowerCase(), hash, salt, name);
 
-  // Servicios de ejemplo para que la cuenta nueva no arranque completamente vacía.
   const defaults = [
     ["Informe de carta natal", "Lectura completa en PDF: personalidad, propósito y potenciales.", "async", null, 28000],
     ["Sesión en vivo · 45 min", "Videollamada para profundizar carta natal o tránsitos actuales.", "video", 45, 35000],
@@ -46,4 +45,12 @@ export async function me(req) {
   const user = authenticate(req);
   if (!user) throw new HttpError(401, "No autenticado.");
   return publicUser(user);
+}
+
+const VALID_PLANS = ["gratis", "pro", "premium"];
+export async function updatePlan(user, planId) {
+  if (!VALID_PLANS.includes(planId)) throw new HttpError(400, "Plan no reconocido.");
+  db.prepare("UPDATE users SET plan = ? WHERE id = ?").run(planId, user.id);
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+  return publicUser(updated);
 }
