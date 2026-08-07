@@ -80,6 +80,22 @@ export async function getCentaurPosition(bodyKey, dateStr) {
 
 export async function getAllCentaurPositions(dateStr) {
   const keys = Object.keys(CENTAUR_COMMANDS);
-  const results = await Promise.all(keys.map(k => getCentaurPosition(k, dateStr)));
-  return Object.fromEntries(keys.map((k, i) => [k, results[i]]));
+  const out = {};
+  // De a uno, no en paralelo — pedir los 3 al mismo tiempo puede hacer que
+  // JPL responda 503 (servidor ocupado) para alguno. Con un reintento simple
+  // por cuerpo alcanza para los 503 transitorios, que son la mayoría. Si
+  // alguno falla igual después de reintentar, se sigue con los otros dos en
+  // vez de perder los tres — mejor una carta con 2 de 3 que con ninguno.
+  for (const key of keys) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        out[key] = await getCentaurPosition(key, dateStr);
+        break;
+      } catch (e) {
+        if (attempt === 0) { await new Promise(r => setTimeout(r, 800)); continue; }
+        console.warn(`JPL Horizons: no se pudo obtener ${key} para ${dateStr} — se omite. ${e.message}`);
+      }
+    }
+  }
+  return out;
 }
