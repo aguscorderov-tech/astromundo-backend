@@ -1,4 +1,3 @@
-
 // server.js
 // Punto de entrada del backend. Un solo proceso Node, cero dependencias de
 // npm (usa node:http y node:sqlite, ambos nativos desde Node 22.5+).
@@ -16,6 +15,7 @@ import * as apptRoutes from "./routes/appointments.js";
 import * as paymentRoutes from "./routes/payments.js";
 import * as paymentSettingsRoutes from "./routes/paymentSettings.js";
 import * as orderRoutes from "./routes/orders.js";
+import * as ephemerisRoutes from "./routes/ephemeris.js";
 
 const PORT = process.env.PORT || 3001;
 
@@ -120,6 +120,12 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    // ---- /api/ephemeris/centaurs?date=YYYY-MM-DD (Quirón, Folo, Neso vía JPL Horizons real) ----
+    if (parts[1] === "ephemeris" && parts[2] === "centaurs" && req.method === "GET") {
+      requireAuth(req);
+      sendJSON(res, 200, await ephemerisRoutes.getCentaurPositions(url.searchParams.get("date"))); return;
+    }
+
     // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
     if (parts[1] === "public") {
       const baseUrl = `${url.protocol}//${req.headers.host}`;
@@ -153,5 +159,7 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
 });
+   
     
     
+ 
