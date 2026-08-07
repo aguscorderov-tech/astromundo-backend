@@ -73,6 +73,9 @@ CREATE TABLE IF NOT EXISTS charts (
   engine TEXT,
   interp_generated INTEGER NOT NULL DEFAULT 0,
   interp_text TEXT,
+  solar_return_year INTEGER,
+  solar_return_moment TEXT,
+  solar_return_place TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -155,13 +158,19 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 `);
 
+// "CREATE TABLE IF NOT EXISTS" no le agrega columnas nuevas a una tabla que
+// ya existía de antes (ej. si el volumen persistente ya tenía datos con el
+// esquema viejo, sin estas columnas) — este bloque las agrega a mano si
+// hace falta, sin tocar los datos que ya había.
+const migrations = [
+  "ALTER TABLE charts ADD COLUMN solar_return_year INTEGER",
+  "ALTER TABLE charts ADD COLUMN solar_return_moment TEXT",
+  "ALTER TABLE charts ADD COLUMN solar_return_place TEXT",
+];
+for (const sql of migrations) {
+  try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
+}
+
 export function newId(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
-  
-  
-  
-
-
-
-
