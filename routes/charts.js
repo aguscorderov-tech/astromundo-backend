@@ -22,17 +22,18 @@ export function getChart(user, chartId) {
 }
 
 export function saveChart(user, body) {
-  const { clientId, positions, houseCusps, aspects, ascLon, mcLon, housesReliable, engine, type, solarReturnYear, solarReturnMoment, solarReturnPlace } = body;
+  const { clientId, positions, houseCusps, aspects, ascLon, mcLon, housesReliable, engine, type, solarReturnYear, solarReturnMoment, solarReturnPlace, transitDate, transitNatalChartId } = body;
   if (!clientId || !positions) throw new HttpError(400, "Faltan clientId o positions.");
   const client = db.prepare("SELECT id FROM clients WHERE id = ? AND user_id = ?").get(clientId, user.id);
   if (!client) throw new HttpError(404, "El cliente de esta carta no existe (o no es tuyo).");
 
   const id = newId("ch");
-  db.prepare(`INSERT INTO charts (id, user_id, client_id, type, positions_json, house_cusps_json, aspects_json, asc_lon, mc_lon, houses_reliable, engine, solar_return_year, solar_return_moment, solar_return_place)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO charts (id, user_id, client_id, type, positions_json, house_cusps_json, aspects_json, asc_lon, mc_lon, houses_reliable, engine, solar_return_year, solar_return_moment, solar_return_place, transit_date, transit_natal_chart_id)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     id, user.id, clientId, type || "natal", JSON.stringify(positions), JSON.stringify(houseCusps || []),
     JSON.stringify(aspects || []), ascLon ?? null, mcLon ?? null, housesReliable ? 1 : 0, engine || null,
-    solarReturnYear ?? null, solarReturnMoment ?? null, solarReturnPlace ?? null
+    solarReturnYear ?? null, solarReturnMoment ?? null, solarReturnPlace ?? null,
+    transitDate ?? null, transitNatalChartId ?? null
   );
   return getChart(user, id);
 }
