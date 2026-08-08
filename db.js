@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS charts (
   solar_return_year INTEGER,
   solar_return_moment TEXT,
   solar_return_place TEXT,
+  transit_date TEXT,
+  transit_natal_chart_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -149,6 +151,21 @@ CREATE TABLE IF NOT EXISTS orders (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Una sinastría compara dos cartas de clientes DISTINTOS del mismo
+-- astrólogo — por eso tiene dos client_id en vez de uno, a diferencia de
+-- charts (que siempre pertenece a un solo cliente).
+CREATE TABLE IF NOT EXISTS synastries (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_a_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_b_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  positions_a_json TEXT NOT NULL,
+  positions_b_json TEXT NOT NULL,
+  aspects_json TEXT NOT NULL,
+  interp_text TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
@@ -156,6 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_appt_user ON appointments(user_id);
 CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
 `);
 
 // "CREATE TABLE IF NOT EXISTS" no le agrega columnas nuevas a una tabla que
@@ -166,6 +184,8 @@ const migrations = [
   "ALTER TABLE charts ADD COLUMN solar_return_year INTEGER",
   "ALTER TABLE charts ADD COLUMN solar_return_moment TEXT",
   "ALTER TABLE charts ADD COLUMN solar_return_place TEXT",
+  "ALTER TABLE charts ADD COLUMN transit_date TEXT",
+  "ALTER TABLE charts ADD COLUMN transit_natal_chart_id TEXT",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
