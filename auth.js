@@ -2,7 +2,7 @@
 // Hash de contraseñas con scrypt (nativo de node:crypto, mismo nivel de
 // seguridad que bcrypt para este caso de uso) y sesiones por token — sin
 // dependencias externas ni JWT: un token aleatorio guardado en la tabla
-// `sessions`, con expiración de 30 días.
+// sessions, con expiración de 30 días.
 
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { db, newId } from "./db.js";
@@ -46,5 +46,20 @@ export function authenticate(req) {
 }
 
 export function publicUser(user) {
-  return { id: user.id, email: user.email, name: user.name, plan: user.plan };
+  return {
+    id: user.id, email: user.email, name: user.name, plan: user.plan,
+    professionalName: user.professional_name, isAdmin: !!user.is_admin, createdAt: user.created_at,
+  };
+}
+
+// El "dueño" de la plataforma se designa por variable de entorno
+// (ADMIN_EMAIL en Railway) — nunca autoasignable desde la app, para que no
+// haya forma de que un astrólogo cualquiera se dé permisos de admin.
+export function grantAdminIfOwner(user) {
+  const ownerEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+  if (ownerEmail && user.email.toLowerCase() === ownerEmail && !user.is_admin) {
+    db.prepare("UPDATE users SET is_admin = 1 WHERE id = ?").run(user.id);
+    user.is_admin = 1;
+  }
+  return user;
 }
