@@ -39,7 +39,14 @@ const server = createServer(async (req, res) => {
     if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
 
     // ---- /api/health ----
-    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "admin-v4" }); return; }
+   if (parts[1] === "health") {
+      sendJSON(res, 200, {
+        ok: true, service: "astromundo-backend", version: "admin-v4",
+        adminEmailConfigured: !!process.env.ADMIN_EMAIL,
+        adminEmailRaw: JSON.stringify(process.env.ADMIN_EMAIL || null), // TEMPORAL — sacar después de diagnosticar
+      });
+      return;
+    }
 
     // ---- /api/auth/* ----
     if (parts[1] === "auth") {
