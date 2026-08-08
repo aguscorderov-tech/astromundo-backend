@@ -17,6 +17,9 @@ import * as paymentSettingsRoutes from "./routes/paymentSettings.js";
 import * as orderRoutes from "./routes/orders.js";
 import * as ephemerisRoutes from "./routes/ephemeris.js";
 import * as synastryRoutes from "./routes/synastries.js";
+import * as backupRoutes from "./routes/backup.js";
+import * as subscriptionRoutes from "./routes/subscriptions.js";
+import * as adminRoutes from "./routes/admin.js";
 
 const PORT = process.env.PORT || 3001;
 
@@ -36,7 +39,7 @@ const server = createServer(async (req, res) => {
     if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
 
     // ---- /api/health ----
-    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "sinastria-v3" }); return; }
+    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "admin-v4" }); return; }
 
     // ---- /api/auth/* ----
     if (parts[1] === "auth") {
@@ -55,6 +58,16 @@ const server = createServer(async (req, res) => {
         const user = requireAuth(req);
         const body = await readJSONBody(req);
         sendJSON(res, 200, await authRoutes.updatePlan(user, body.plan)); return;
+      }
+      if (parts[2] === "profile" && req.method === "PUT") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.updateProfile(user, body)); return;
+      }
+      if (parts[2] === "password" && req.method === "PUT") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.changePassword(user, body)); return;
       }
     }
 
@@ -136,6 +149,30 @@ const server = createServer(async (req, res) => {
       if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, synastryRoutes.deleteSynastry(user, parts[2])); return; }
     }
 
+    // ---- /api/backup (cada astrólogo descarga SUS propios datos) ----
+    if (parts[1] === "backup" && req.method === "GET") {
+      const user = requireAuth(req);
+      sendJSON(res, 200, backupRoutes.exportUserData(user)); return;
+    }
+
+    // ---- /api/subscriptions (el astrólogo paga de verdad para pasar a Pro/Premium) ----
+    if (parts[1] === "subscriptions") {
+      const user = requireAuth(req);
+      const baseUrl = `${url.protocol}//${req.headers.host}`;
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, subscriptionRoutes.listMySubscriptions(user)); return; }
+      if (parts.length === 3 && parts[2] === "checkout" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await subscriptionRoutes.createSubscriptionCheckout(user, body.plan, baseUrl)); return;
+      }
+    }
+
+    // ---- /api/admin/* (solo el dueño de la plataforma) ----
+    if (parts[1] === "admin") {
+      const user = requireAuth(req);
+      if (parts[2] === "astrologers" && req.method === "GET") { sendJSON(res, 200, adminRoutes.listAllAstrologers(user)); return; }
+      if (parts[2] === "stats" && req.method === "GET") { sendJSON(res, 200, adminRoutes.platformStats(user)); return; }
+    }
+
     // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
     if (parts[1] === "public") {
       const baseUrl = `${url.protocol}//${req.headers.host}`;
@@ -149,6 +186,11 @@ const server = createServer(async (req, res) => {
         const body = await readJSONBody(req).catch(() => ({}));
         await orderRoutes.handleMercadopagoWebhook(url.searchParams, req.headers, body);
         sendJSON(res, 200, { received: true }); return; // siempre 200, MP reintenta si no
+      }
+      if (parts[2] === "webhooks" && parts[3] === "platform-subscription" && req.method === "POST") {
+        const body = await readJSONBody(req).catch(() => ({}));
+        await subscriptionRoutes.handleSubscriptionWebhook(url.searchParams, req.headers, body);
+        sendJSON(res, 200, { received: true }); return;
       }
       if (parts[2] === "webhooks" && parts[3] === "paypal" && parts[4] === "capture" && req.method === "GET") {
         const result = await orderRoutes.capturePaypalOrder(url.searchParams.get("orderId"), url.searchParams.get("token"));
@@ -169,5 +211,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
 });
-    
- 
+  
+   
