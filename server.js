@@ -16,6 +16,7 @@ import * as paymentRoutes from "./routes/payments.js";
 import * as paymentSettingsRoutes from "./routes/paymentSettings.js";
 import * as orderRoutes from "./routes/orders.js";
 import * as ephemerisRoutes from "./routes/ephemeris.js";
+import * as synastryRoutes from "./routes/synastries.js";
 
 const PORT = process.env.PORT || 3001;
 
@@ -35,7 +36,7 @@ const server = createServer(async (req, res) => {
     if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
 
     // ---- /api/health ----
-    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "planes-v2" }); return; }
+    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "sinastria-v3" }); return; }
 
     // ---- /api/auth/* ----
     if (parts[1] === "auth") {
@@ -126,6 +127,15 @@ const server = createServer(async (req, res) => {
       sendJSON(res, 200, await ephemerisRoutes.getCentaurPositions(url.searchParams.get("date"))); return;
     }
 
+    // ---- /api/synastries ----
+    if (parts[1] === "synastries") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.listSynastries(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, synastryRoutes.createSynastry(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.getSynastry(user, parts[2])); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, synastryRoutes.deleteSynastry(user, parts[2])); return; }
+    }
+
     // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
     if (parts[1] === "public") {
       const baseUrl = `${url.protocol}//${req.headers.host}`;
@@ -159,7 +169,5 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
 });
-   
-    
     
  
