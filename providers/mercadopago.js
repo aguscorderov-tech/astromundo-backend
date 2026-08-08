@@ -35,12 +35,13 @@ export async function createPreference(accessToken, { title, amountCents, curren
 // Sin card_token_id ni status:"authorized", MP crea la suscripción en estado
 // pendiente y da un init_point donde el propio cliente termina de autorizarla
 // con su tarjeta — no necesitamos (ni queremos) tocar sus datos de tarjeta.
-export async function createPreapproval(accessToken, { reason, amountCents, currency, frequency, frequencyType, payerEmail, externalReference, backUrl }) {
+export async function createPreapproval(accessToken, { reason, amountCents, currency, frequency, frequencyType, payerEmail, externalReference, backUrl, notificationUrl }) {
   const body = {
     reason,
     external_reference: externalReference,
     payer_email: payerEmail,
     back_url: backUrl,
+    notification_url: notificationUrl,
     auto_recurring: {
       frequency: frequency || 1,
       frequency_type: frequencyType || "months",
