@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   password_salt TEXT NOT NULL,
   name TEXT NOT NULL,
+  professional_name TEXT,
   plan TEXT NOT NULL DEFAULT 'gratis',
+  is_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -166,6 +168,20 @@ CREATE TABLE IF NOT EXISTS synastries (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Suscripción del ASTRÓLOGO hacia el DUEÑO de la plataforma (distinto de
+-- payments, que es lo que el astrólogo cobra a SUS clientes). Acá el
+-- comprador es el astrólogo, y el que recibe la plata sos vos.
+CREATE TABLE IF NOT EXISTS platform_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  provider_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
@@ -174,6 +190,7 @@ CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
+CREATE INDEX IF NOT EXISTS idx_platform_subs_user ON platform_subscriptions(user_id);
 `);
 
 // "CREATE TABLE IF NOT EXISTS" no le agrega columnas nuevas a una tabla que
@@ -186,6 +203,8 @@ const migrations = [
   "ALTER TABLE charts ADD COLUMN solar_return_place TEXT",
   "ALTER TABLE charts ADD COLUMN transit_date TEXT",
   "ALTER TABLE charts ADD COLUMN transit_natal_chart_id TEXT",
+  "ALTER TABLE users ADD COLUMN professional_name TEXT",
+  "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
