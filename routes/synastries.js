@@ -13,6 +13,7 @@ export function getSynastry(user, id) {
 }
 
 export function createSynastry(user, body) {
+  if (user.plan === "gratis") throw new HttpError(403, "Sinastría es una función de los planes Pro y Premium.");
   const { clientAId, clientBId, positionsA, positionsB, aspects, interpText } = body;
   if (!clientAId || !clientBId || !positionsA || !positionsB) throw new HttpError(400, "Faltan datos para crear la sinastría.");
   if (clientAId === clientBId) throw new HttpError(400, "Elegí dos clientes distintos.");
