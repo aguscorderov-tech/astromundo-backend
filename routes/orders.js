@@ -11,10 +11,16 @@ import * as paypal from "../providers/paypal.js";
 const COMMISSION_RATE = 0.045; // informativo — no hay split automático de fondos, Mercado Pago/PayPal no lo hacen solos sin cuenta marketplace
 
 export function listPublicServices(astrologerId) {
-  const user = db.prepare("SELECT id, name FROM users WHERE id = ?").get(astrologerId);
+  const user = db.prepare("SELECT id, name, plan FROM users WHERE id = ?").get(astrologerId);
   if (!user) throw new HttpError(404, "Astrólogo no encontrado.");
   const services = db.prepare("SELECT id, name, description, modality, duration_minutes, price_cents, currency FROM services WHERE user_id = ? AND is_active = 1").all(astrologerId);
-  return { astrologerName: user.name, services };
+  // El plan del astrólogo determina qué métodos de pago puede ofrecer en su
+  // página pública — transferencia siempre, Mercado Pago desde Pro, PayPal
+  // solo en Premium.
+  const availableMethods = ["transferencia"];
+  if (user.plan === "pro" || user.plan === "premium") availableMethods.push("mercadopago", "debito_automatico");
+  if (user.plan === "premium") availableMethods.push("paypal");
+  return { astrologerName: user.name, services, availableMethods };
 }
 
 function recordOrder({ userId, serviceId, clientName, clientEmail, amountCents, currency, paymentMethod }) {
@@ -39,6 +45,12 @@ function markOrderApproved(orderId, providerRef) {
 export async function createOrder(astrologerId, body, baseUrl) {
   const { serviceId, clientName, clientEmail, paymentMethod } = body;
   if (!serviceId || !clientName || !paymentMethod) throw new HttpError(400, "Faltan serviceId, clientName o paymentMethod.");
+
+  const astrologer = db.prepare("SELECT plan FROM users WHERE id = ?").get(astrologerId);
+  if (!astrologer) throw new HttpError(404, "Astrólogo no encontrado.");
+  const isMpMethod = paymentMethod === "mercadopago" || paymentMethod === "debito_automatico";
+  if (isMpMethod && astrologer.plan === "gratis") throw new HttpError(403, "Este astrólogo todavía no puede cobrar por Mercado Pago (requiere plan Pro o Premium).");
+  if (paymentMethod === "paypal" && astrologer.plan !== "premium") throw new HttpError(403, "Este astrólogo todavía no puede cobrar por PayPal (requiere plan Premium).");
 
   const service = db.prepare("SELECT * FROM services WHERE id = ? AND user_id = ? AND is_active = 1").get(serviceId, astrologerId);
   if (!service) throw new HttpError(404, "Servicio no disponible.");
