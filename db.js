@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS clients (
   lng REAL,
   tz TEXT,
   tz_name TEXT,
+  notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -78,8 +79,11 @@ CREATE TABLE IF NOT EXISTS charts (
   solar_return_year INTEGER,
   solar_return_moment TEXT,
   solar_return_place TEXT,
+  lunar_return_moment TEXT,
+  lunar_return_place TEXT,
   transit_date TEXT,
   transit_natal_chart_id TEXT,
+  house_system TEXT DEFAULT 'equal',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -205,6 +209,10 @@ const migrations = [
   "ALTER TABLE charts ADD COLUMN transit_natal_chart_id TEXT",
   "ALTER TABLE users ADD COLUMN professional_name TEXT",
   "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE clients ADD COLUMN notes TEXT",
+  "ALTER TABLE charts ADD COLUMN lunar_return_moment TEXT",
+  "ALTER TABLE charts ADD COLUMN lunar_return_place TEXT",
+  "ALTER TABLE charts ADD COLUMN house_system TEXT DEFAULT 'equal'",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
