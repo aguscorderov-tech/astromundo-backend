@@ -15,11 +15,11 @@ export function listPublicServices(astrologerId) {
   if (!user) throw new HttpError(404, "Astrólogo no encontrado.");
   const services = db.prepare("SELECT id, name, description, modality, duration_minutes, price_cents, currency FROM services WHERE user_id = ? AND is_active = 1").all(astrologerId);
   // El plan del astrólogo determina qué métodos de pago puede ofrecer en su
-  // página pública — transferencia siempre, Mercado Pago desde Pro, PayPal
-  // solo en Premium.
+  // página pública — transferencia siempre; Mercado Pago, débito automático
+  // y PayPal desde Pro (Pro y Premium quedan iguales en esto, la diferencia
+  // entre esos dos planes está en otro lado, no en los métodos de cobro).
   const availableMethods = ["transferencia"];
-  if (user.plan === "pro" || user.plan === "premium") availableMethods.push("mercadopago", "debito_automatico");
-  if (user.plan === "premium") availableMethods.push("paypal");
+  if (user.plan === "pro" || user.plan === "premium") availableMethods.push("mercadopago", "debito_automatico", "paypal");
   return { astrologerName: user.name, services, availableMethods };
 }
 
@@ -50,7 +50,7 @@ export async function createOrder(astrologerId, body, baseUrl) {
   if (!astrologer) throw new HttpError(404, "Astrólogo no encontrado.");
   const isMpMethod = paymentMethod === "mercadopago" || paymentMethod === "debito_automatico";
   if (isMpMethod && astrologer.plan === "gratis") throw new HttpError(403, "Este astrólogo todavía no puede cobrar por Mercado Pago (requiere plan Pro o Premium).");
-  if (paymentMethod === "paypal" && astrologer.plan !== "premium") throw new HttpError(403, "Este astrólogo todavía no puede cobrar por PayPal (requiere plan Premium).");
+  if (paymentMethod === "paypal" && astrologer.plan === "gratis") throw new HttpError(403, "Este astrólogo todavía no puede cobrar por PayPal (requiere plan Pro o Premium).");
 
   const service = db.prepare("SELECT * FROM services WHERE id = ? AND user_id = ? AND is_active = 1").get(serviceId, astrologerId);
   if (!service) throw new HttpError(404, "Servicio no disponible.");
