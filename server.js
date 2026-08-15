@@ -230,6 +230,10 @@ const server = createServer(async (req, res) => {
       const user = requireAuth(req);
       if (parts[2] === "astrologers" && req.method === "GET") { sendJSON(res, 200, adminRoutes.listAllAstrologers(user)); return; }
       if (parts[2] === "stats" && req.method === "GET") { sendJSON(res, 200, adminRoutes.platformStats(user)); return; }
+      if (parts[2] === "astrologers" && parts[3] && parts[4] === "plan" && req.method === "PUT") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, adminRoutes.setUserPlan(user, parts[3], body.plan)); return;
+      }
     }
 
     // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
