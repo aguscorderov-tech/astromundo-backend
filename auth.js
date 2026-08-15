@@ -2,7 +2,7 @@
 // Hash de contraseñas con scrypt (nativo de node:crypto, mismo nivel de
 // seguridad que bcrypt para este caso de uso) y sesiones por token — sin
 // dependencias externas ni JWT: un token aleatorio guardado en la tabla
-// sessions, con expiración de 30 días.
+// `sessions`, con expiración de 30 días.
 
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { db, newId } from "./db.js";
@@ -49,6 +49,7 @@ export function publicUser(user) {
   return {
     id: user.id, email: user.email, name: user.name, plan: user.plan,
     professionalName: user.professional_name, isAdmin: !!user.is_admin, createdAt: user.created_at,
+    photoUrl: user.photo_url, bio: user.bio,
   };
 }
 
