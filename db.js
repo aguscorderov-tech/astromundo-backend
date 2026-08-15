@@ -213,6 +213,8 @@ const migrations = [
   "ALTER TABLE charts ADD COLUMN lunar_return_moment TEXT",
   "ALTER TABLE charts ADD COLUMN lunar_return_place TEXT",
   "ALTER TABLE charts ADD COLUMN house_system TEXT DEFAULT 'equal'",
+  "ALTER TABLE users ADD COLUMN photo_url TEXT",
+  "ALTER TABLE users ADD COLUMN bio TEXT",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
