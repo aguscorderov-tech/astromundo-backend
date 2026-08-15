@@ -45,6 +45,45 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 
+-- Límite de intentos de login (Fase 0 del plan de seguridad). identifier es
+-- el email en minúsculas — no la IP, porque acá no hay proxy configurado
+-- para leerla de forma confiable, y por email alcanza para frenar fuerza
+-- bruta contra una cuenta puntual.
+CREATE TABLE IF NOT EXISTS login_attempts (
+  identifier TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  window_started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  blocked_until TEXT
+);
+
+-- Registro de eventos de seguridad (Fase 1 del plan). user_id puede quedar
+-- en null (ON DELETE SET NULL, no CASCADE) — si alguien borra su cuenta,
+-- el registro de que hubo, por ejemplo, un intento de login sospechoso
+-- sigue teniendo valor para revisar más adelante; el email queda como
+-- referencia aunque la cuenta ya no exista.
+CREATE TABLE IF NOT EXISTS security_events (
+  id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  email TEXT,
+  event_type TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Verificación en dos pasos (Fase 2, ítem 13). totp_secret se guarda ya al
+-- pedir el alta (para poder mostrar el código QR), pero totp_enabled sigue
+-- en 0 hasta que la persona confirme con un código real generado por su
+-- app — así una activación a medio hacer nunca deja a nadie bloqueado del
+-- login. login_2fa_pending es la sesión CORTA (5 minutos) que existe entre
+-- "contraseña correcta" y "código de la app correcto" — nunca es una
+-- sesión real, no sirve para nada más que completar el segundo paso.
+CREATE TABLE IF NOT EXISTS login_2fa_pending (
+  token TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS clients (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -215,6 +254,8 @@ const migrations = [
   "ALTER TABLE charts ADD COLUMN house_system TEXT DEFAULT 'equal'",
   "ALTER TABLE users ADD COLUMN photo_url TEXT",
   "ALTER TABLE users ADD COLUMN bio TEXT",
+  "ALTER TABLE users ADD COLUMN totp_secret TEXT",
+  "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
