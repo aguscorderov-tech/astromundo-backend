@@ -64,8 +64,21 @@ export async function updatePlan(user, planId) {
 }
 
 export async function updateProfile(user, body) {
-  const { professionalName } = body;
-  db.prepare("UPDATE users SET professional_name = ? WHERE id = ?").run(professionalName || null, user.id);
+  // Actualización PARCIAL de verdad: antes, mandar solo {bio} sin
+  // professionalName lo pisaba con NULL (professionalName||null, sin
+  // chequear si el campo vino siquiera) — acá cada columna se toca SOLO si
+  // esa clave está presente en el body. photoUrl:null sigue funcionando
+  // para "sacar la foto" (el frontend ya lo usa así), porque la clave SÍ
+  // está presente, solo que su valor es null.
+  const campos = [];
+  const valores = [];
+  if ("professionalName" in body) { campos.push("professional_name = ?"); valores.push(body.professionalName || null); }
+  if ("photoUrl" in body) { campos.push("photo_url = ?"); valores.push(body.photoUrl || null); }
+  if ("bio" in body) { campos.push("bio = ?"); valores.push(body.bio || null); }
+  if (campos.length > 0) {
+    valores.push(user.id);
+    db.prepare(`UPDATE users SET ${campos.join(", ")} WHERE id = ?`).run(...valores);
+  }
   const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
   return publicUser(updated);
 }
