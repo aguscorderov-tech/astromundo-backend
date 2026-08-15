@@ -4,12 +4,14 @@
 
 export function sendJSON(res, status, data) {
   const body = JSON.stringify(data);
+  // Los headers de CORS y de seguridad ya se ponen una sola vez, al
+  // principio de cada pedido, en aplicarHeadersDeSeguridad() (server.js) —
+  // acá NO hay que repetirlos: si esta llamada a writeHead() incluyera de
+  // nuevo "Access-Control-Allow-Origin", pisaría (con el valor viejo,
+  // abierto a *) lo que ya se calculó bien más arriba.
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
   });
   res.end(body);
 }
