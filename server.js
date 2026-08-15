@@ -23,6 +23,38 @@ import * as adminRoutes from "./routes/admin.js";
 
 const PORT = process.env.PORT || 3001;
 
+// ORIGIN_ALLOWLIST: dominios reales desde donde se puede llamar a esta API,
+// separados por coma en la variable de entorno ALLOWED_ORIGINS de Railway
+// (ej: "https://astromundo.pages.dev,https://tudominio.com"). Sin esa
+// variable cargada, cae a *: sigue funcionando, pero sin la restricción real
+// — hay que cargarla en Railway para que esto sirva de algo.
+const ORIGIN_ALLOWLIST = (process.env.ALLOWED_ORIGINS || "")
+  .split(",").map(o => o.trim()).filter(Boolean);
+
+function aplicarHeadersDeSeguridad(req, res) {
+  const origin = req.headers.origin;
+  if (ORIGIN_ALLOWLIST.length === 0) {
+    // Sin la variable configurada: mismo comportamiento de antes (abierto a
+    // cualquier origen), para no romper nada en el primer despliegue de
+    // este cambio. En cuanto se cargue ALLOWED_ORIGINS, se restringe solo.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (origin && ORIGIN_ALLOWLIST.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  // Si hay lista cargada y el origen del pedido NO está en ella, no se pone
+  // el header — el navegador bloquea la respuesta del lado del que pidió.
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+
+  // Headers de seguridad — esta API solo devuelve JSON (nunca HTML), así
+  // que no hace falta una Content-Security-Policy pensada para páginas;
+  // estos aplican igual y son la protección de base para cualquier API.
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+}
+
 function requireAuth(req) {
   const user = authenticate(req);
   if (!user) throw new HttpError(401, "No autenticado — mandá el header Authorization: Bearer <token>.");
@@ -30,6 +62,7 @@ function requireAuth(req) {
 }
 
 const server = createServer(async (req, res) => {
+  aplicarHeadersDeSeguridad(req, res);
   if (req.method === "OPTIONS") { sendJSON(res, 204, {}); return; }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -39,7 +72,7 @@ const server = createServer(async (req, res) => {
     if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
 
     // ---- /api/health ----
-   if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "admin-v4" }); return; }
+    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "admin-v4" }); return; }
 
     // ---- /api/auth/* ----
     if (parts[1] === "auth") {
@@ -68,6 +101,32 @@ const server = createServer(async (req, res) => {
         const user = requireAuth(req);
         const body = await readJSONBody(req);
         sendJSON(res, 200, await authRoutes.changePassword(user, body)); return;
+      }
+      if (parts[2] === "account" && req.method === "DELETE") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.deleteAccount(user, body)); return;
+      }
+      // Verificación en dos pasos (TOTP). El segundo paso del login
+      // (completeLogin2fa) es público a propósito — a esa altura todavía
+      // no hay una sesión real, es lo que la termina de crear.
+      if (parts[2] === "2fa" && parts[3] === "login" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.completeLogin2fa(body)); return;
+      }
+      if (parts[2] === "2fa" && parts[3] === "setup" && req.method === "POST") {
+        const user = requireAuth(req);
+        sendJSON(res, 200, await authRoutes.setupTotp(user)); return;
+      }
+      if (parts[2] === "2fa" && parts[3] === "confirm" && req.method === "POST") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.confirmTotp(user, body)); return;
+      }
+      if (parts[2] === "2fa" && req.method === "DELETE") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.disableTotpRoute(user, body)); return;
       }
     }
 
@@ -193,7 +252,7 @@ const server = createServer(async (req, res) => {
         sendJSON(res, 200, { received: true }); return;
       }
       if (parts[2] === "webhooks" && parts[3] === "paypal" && parts[4] === "capture" && req.method === "GET") {
-        const result = await orderRoutes.capturePaypalOrder(url.searchParams.get("orderId"), url.searchParams.get("token"));
+        const result = await orderRoutes.capturePaypalOrder(url.searchParams.get("orderId"));
         res.writeHead(302, { Location: `/reservar-gracias.html?status=${result.status}` });
         res.end();
         return;
@@ -211,5 +270,3 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
 });
-  
-   
