@@ -129,12 +129,40 @@ export async function handleMercadopagoWebhook(query, headers, body) {
   if (payment.status === "approved") markOrderApproved(order.id, String(paymentId));
 }
 
-export async function capturePaypalOrder(orderId, token) {
+export async function capturePaypalOrder(orderId) {
   const order = orderId && db.prepare("SELECT * FROM orders WHERE id = ?").get(orderId);
   if (!order) throw new HttpError(404, "Orden no encontrada.");
+  if (!order.provider_ref) throw new HttpError(400, "Esta orden todavía no tiene una referencia de PayPal — no se creó correctamente.");
   const settings = getSettingsWithSecrets(order.user_id);
-  const result = await paypal.captureOrder(settings.paypalClientId, settings.paypalClientSecret, settings.paypalMode, token || order.provider_ref);
-  if (result.status === "COMPLETED") markOrderApproved(order.id, order.provider_ref);
+  // Se captura SIEMPRE con la referencia que guardamos nosotros al crear la
+  // orden (provider_ref), nunca con un token que venga de la URL — ese
+  // token llegaba sin autenticar (es un webhook público) y antes se usaba
+  // en vez del valor real, así que alcanzaba con pasar el orderId de una
+  // orden cara junto con el token real de una captura legítima pero barata
+  // de OTRA orden para que esta quedara marcada como pagada igual.
+  const result = await paypal.captureOrder(settings.paypalClientId, settings.paypalClientSecret, settings.paypalMode, order.provider_ref);
+
+  if (result.status === "COMPLETED") {
+    // Capa extra además de lo de arriba: se compara el monto que PayPal
+    // realmente capturó contra el monto real de esta orden. Con
+    // provider_ref fijo esto ya no debería poder fallar nunca en un uso
+    // normal, pero es la verificación de fondo real — no cuesta nada
+    // tenerla igual.
+    const captura = result.purchase_units && result.purchase_units[0] &&
+      result.purchase_units[0].payments && result.purchase_units[0].payments.captures &&
+      result.purchase_units[0].payments.captures[0];
+    const montoCapturadoCents = captura ? Math.round(parseFloat(captura.amount.value) * 100) : null;
+    const monedaCapturada = captura && captura.amount && captura.amount.currency_code;
+
+    if (montoCapturadoCents !== order.amount_cents || monedaCapturada !== order.currency) {
+      console.warn(
+        `Captura de PayPal con monto/moneda que no coincide con la orden ${order.id} — se ignora, no se aprueba. ` +
+        `Esperado: ${order.amount_cents} ${order.currency}. Capturado: ${montoCapturadoCents} ${monedaCapturada}.`
+      );
+      throw new HttpError(400, "El monto capturado no coincide con el de la orden — no se aprobó.");
+    }
+    markOrderApproved(order.id, order.provider_ref);
+  }
   return { status: result.status };
 }
 

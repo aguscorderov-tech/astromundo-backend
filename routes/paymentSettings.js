@@ -3,6 +3,7 @@
 // ni las de la plataforma. Cada astrólogo cobra a su propia cuenta.
 
 import { db } from "../db.js";
+import { cifrar, descifrar } from "../crypto-secrets.js";
 
 function hydrate(row, includeSecrets) {
   if (!row) {
@@ -26,9 +27,9 @@ function hydrate(row, includeSecrets) {
   // Los secretos (access token, client secret) solo se devuelven cuando el
   // propio backend los necesita para llamar a los proveedores — nunca al frontend.
   if (includeSecrets) {
-    out.mpAccessToken = row.mp_access_token;
-    out.mpWebhookSecret = row.mp_webhook_secret;
-    out.paypalClientSecret = row.paypal_client_secret;
+    out.mpAccessToken = descifrar(row.mp_access_token);
+    out.mpWebhookSecret = descifrar(row.mp_webhook_secret);
+    out.paypalClientSecret = descifrar(row.paypal_client_secret);
   }
   return out;
 }
@@ -48,11 +49,17 @@ export function getSettingsWithSecrets(userId) {
 export function updateSettings(user, body) {
   const existing = db.prepare("SELECT * FROM payment_settings WHERE user_id = ?").get(user.id);
   const merged = {
-    mp_access_token: body.mpAccessToken !== undefined ? (body.mpAccessToken || null) : (existing ? existing.mp_access_token : null),
+    // Los tres secretos reales se cifran ACÁ, al guardar — solo cuando el
+    // valor viene nuevo en el body. Si no vino (undefined), se usa el
+    // valor que ya estaba guardado tal cual está (ya cifrado de un guardado
+    // anterior, o todavía en texto plano si es un dato viejo de antes de
+    // este cambio) — nunca se re-cifra algo que ya está guardado, eso
+    // rompería el descifrado la próxima vez.
+    mp_access_token: body.mpAccessToken !== undefined ? cifrar(body.mpAccessToken || null) : (existing ? existing.mp_access_token : null),
     mp_public_key: body.mpPublicKey !== undefined ? (body.mpPublicKey || null) : (existing ? existing.mp_public_key : null),
-    mp_webhook_secret: body.mpWebhookSecret !== undefined ? (body.mpWebhookSecret || null) : (existing ? existing.mp_webhook_secret : null),
+    mp_webhook_secret: body.mpWebhookSecret !== undefined ? cifrar(body.mpWebhookSecret || null) : (existing ? existing.mp_webhook_secret : null),
     paypal_client_id: body.paypalClientId !== undefined ? (body.paypalClientId || null) : (existing ? existing.paypal_client_id : null),
-    paypal_client_secret: body.paypalClientSecret !== undefined ? (body.paypalClientSecret || null) : (existing ? existing.paypal_client_secret : null),
+    paypal_client_secret: body.paypalClientSecret !== undefined ? cifrar(body.paypalClientSecret || null) : (existing ? existing.paypal_client_secret : null),
     paypal_mode: body.paypalMode || (existing ? existing.paypal_mode : "sandbox"),
     bank_name: body.bankName !== undefined ? (body.bankName || null) : (existing ? existing.bank_name : null),
     bank_alias: body.bankAlias !== undefined ? (body.bankAlias || null) : (existing ? existing.bank_alias : null),
