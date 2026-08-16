@@ -1,6 +1,7 @@
 // routes/admin.js
 import { db } from "../db.js";
 import { HttpError } from "../http-utils.js";
+import { registrarEvento } from "../auth.js";
 
 function requireAdmin(user) {
   if (!user.is_admin) throw new HttpError(403, "No tenés permisos de administrador.");
@@ -24,4 +25,24 @@ export function platformStats(user) {
   const totalUsers = db.prepare("SELECT COUNT(*) as count FROM users").get().count;
   const activeSubs = db.prepare("SELECT COUNT(*) as count, COALESCE(SUM(amount_cents),0) as total FROM platform_subscriptions WHERE status='active'").get();
   return { totalUsers, byPlan, activeSubscriptions: activeSubs.count, monthlyRecurringRevenueCents: activeSubs.total };
+}
+
+const PLANES_VALIDOS = ["gratis", "pro", "premium"];
+
+/** Asignar un plan directo, sin pasar por ningún pago — para invitados,
+    cuentas de prueba, etc. Queda registrado en security_events porque es
+    una acción sensible (un admin dándole a alguien acceso pago gratis),
+    no algo que deba pasar en silencio. */
+export function setUserPlan(adminUser, targetUserId, newPlan) {
+  requireAdmin(adminUser);
+  if (!PLANES_VALIDOS.includes(newPlan)) throw new HttpError(400, "Plan no reconocido.");
+  const target = db.prepare("SELECT * FROM users WHERE id = ?").get(targetUserId);
+  if (!target) throw new HttpError(404, "Usuario no encontrado.");
+
+  db.prepare("UPDATE users SET plan = ? WHERE id = ?").run(newPlan, targetUserId);
+  registrarEvento("admin_set_plan", {
+    userId: adminUser.id, email: adminUser.email,
+    detail: `${adminUser.email} le asignó el plan "${newPlan}" a ${target.email} (antes: "${target.plan}")`,
+  });
+  return { updated: true };
 }
