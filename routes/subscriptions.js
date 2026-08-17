@@ -56,9 +56,25 @@ export async function handleSubscriptionWebhook(query, headers, body) {
   }
 
   const preapproval = await mp.getPreapproval(accessToken, sub.provider_ref);
+
   if (preapproval.status === "authorized") {
     db.prepare("UPDATE platform_subscriptions SET status='active', updated_at=datetime('now') WHERE id=?").run(sub.id);
     db.prepare("UPDATE users SET plan = ? WHERE id = ?").run(sub.plan, sub.user_id);
+    return;
+  }
+
+  // "paused" o "cancelled" -- el astrólogo dejó de pagar (canceló él mismo,
+  // o Mercado Pago la canceló sola después de varios cobros rechazados).
+  // Solo lo bajamos a Gratis si el plan de ESTA suscripción sigue siendo el
+  // que tiene activo ahora mismo -- si mientras tanto pasó a otro plan por
+  // otro camino (por ejemplo, se lo asignó un admin a mano), no lo tocamos,
+  // para no pisar ese cambio posterior sin querer.
+  if (preapproval.status === "paused" || preapproval.status === "cancelled") {
+    db.prepare("UPDATE platform_subscriptions SET status=?, updated_at=datetime('now') WHERE id=?").run(preapproval.status, sub.id);
+    const user = db.prepare("SELECT plan FROM users WHERE id = ?").get(sub.user_id);
+    if (user && user.plan === sub.plan) {
+      db.prepare("UPDATE users SET plan = 'gratis' WHERE id = ?").run(sub.user_id);
+    }
   }
 }
 
