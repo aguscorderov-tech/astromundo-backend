@@ -36,9 +36,6 @@ export function saveChart(user, body) {
     const label = { transit: "Tránsitos", solar_return: "Revolución solar", lunar_return: "Retorno lunar" }[type];
     throw new HttpError(403, `${label} es una función de los planes Pro y Premium.`);
   }
-  if (houseSystem === "placidus" && user.plan === "gratis") {
-    throw new HttpError(403, "El sistema de casas Placidus es una función del plan Premium.");
-  }
 
   const client = db.prepare("SELECT id FROM clients WHERE id = ? AND user_id = ?").get(clientId, user.id);
   if (!client) throw new HttpError(404, "El cliente de esta carta no existe (o no es tuyo).");
