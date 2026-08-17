@@ -234,6 +234,49 @@ CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
 CREATE INDEX IF NOT EXISTS idx_platform_subs_user ON platform_subscriptions(user_id);
+
+-- ============================================================
+-- Cuentas de CLIENTE FINAL (sección aparte, para el propio cliente del
+-- astrólogo — no confundir con la tabla clients, que es la ficha que
+-- arma el astrólogo y sigue existiendo igual que antes).
+--
+-- Login separado del de los astrólogos a propósito: tabla y sesión propias,
+-- para que un token de cliente nunca pueda usarse donde se espera un
+-- astrólogo, ni viceversa -- son dos identidades distintas aunque compartan
+-- el mismo motor de hash de contraseña.
+--
+-- Carga sus propios datos de nacimiento acá mismo (para la entrada
+-- "directa", sin astrólogo de por medio). Cuando el email coincide con una
+-- ficha que un astrólogo ya le había cargado en clients, esa ficha se
+-- vincula sola (ver client_account_id más abajo) -- así no se duplican
+-- datos de nacimiento en dos lugares que se puedan desincronizar.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS client_accounts (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  name TEXT NOT NULL,
+  date TEXT,
+  time TEXT,
+  time_unknown INTEGER NOT NULL DEFAULT 0,
+  place TEXT,
+  lat REAL,
+  lng REAL,
+  tz TEXT,
+  tz_name TEXT,
+  notification_pref TEXT NOT NULL DEFAULT 'weekly',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS client_sessions (
+  token TEXT PRIMARY KEY,
+  client_account_id TEXT NOT NULL REFERENCES client_accounts(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_sessions_account ON client_sessions(client_account_id);
 `);
 
 // "CREATE TABLE IF NOT EXISTS" no le agrega columnas nuevas a una tabla que
@@ -256,6 +299,8 @@ const migrations = [
   "ALTER TABLE users ADD COLUMN bio TEXT",
   "ALTER TABLE users ADD COLUMN totp_secret TEXT",
   "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE clients ADD COLUMN client_account_id TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_clients_account ON clients(client_account_id)",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
