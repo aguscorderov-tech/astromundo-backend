@@ -5,9 +5,11 @@
 
 import { createServer } from "node:http";
 import { authenticate } from "./auth.js";
+import { authenticateClient } from "./auth-cliente.js";
 import { sendJSON, readJSONBody, HttpError } from "./http-utils.js";
 
 import * as authRoutes from "./routes/auth.js";
+import * as clientAuthRoutes from "./routes/clientAuth.js";
 import * as clientRoutes from "./routes/clients.js";
 import * as chartRoutes from "./routes/charts.js";
 import * as serviceRoutes from "./routes/services.js";
@@ -59,6 +61,12 @@ function requireAuth(req) {
   const user = authenticate(req);
   if (!user) throw new HttpError(401, "No autenticado — mandá el header Authorization: Bearer <token>.");
   return user;
+}
+
+function requireClientAuth(req) {
+  const account = authenticateClient(req);
+  if (!account) throw new HttpError(401, "No autenticado — mandá el header X-Client-Auth: Bearer <token>.");
+  return account;
 }
 
 const server = createServer(async (req, res) => {
@@ -127,6 +135,24 @@ const server = createServer(async (req, res) => {
         const user = requireAuth(req);
         const body = await readJSONBody(req);
         sendJSON(res, 200, await authRoutes.disableTotpRoute(user, body)); return;
+      }
+    }
+
+    // ---- /api/client-auth/* (cuenta de CLIENTE FINAL, sección aparte de
+    // la app -- ver auth-cliente.js para el porqué de la sesión separada) ----
+    if (parts[1] === "client-auth") {
+      if (parts[2] === "register" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await clientAuthRoutes.registerClient(body)); return;
+      }
+      if (parts[2] === "login" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.loginClient(body)); return;
+      }
+      if (parts[2] === "confirm-link" && req.method === "POST") {
+        const account = requireClientAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.confirmLink(account, body)); return;
       }
     }
 
