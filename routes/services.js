@@ -2,12 +2,22 @@
 import { db, newId } from "../db.js";
 import { HttpError } from "../http-utils.js";
 
+const GRATIS_SERVICE_LIMIT = 3;
+
 export function listServices(user) {
   return db.prepare("SELECT * FROM services WHERE user_id = ? ORDER BY created_at ASC").all(user.id);
 }
 
 export function createService(user, body) {
   if (!body.name) throw new HttpError(400, "El servicio necesita un nombre.");
+
+  if (user.plan === "gratis") {
+    const count = db.prepare("SELECT COUNT(*) as n FROM services WHERE user_id = ?").get(user.id).n;
+    if (count >= GRATIS_SERVICE_LIMIT) {
+      throw new HttpError(403, `El plan Gratis permite hasta ${GRATIS_SERVICE_LIMIT} servicios — pasá a Pro o Premium para cargar servicios ilimitados.`);
+    }
+  }
+
   const id = newId("s");
   db.prepare(`INSERT INTO services (id, user_id, name, description, modality, duration_minutes, price_cents, is_active)
               VALUES (?,?,?,?,?,?,?,1)`).run(
