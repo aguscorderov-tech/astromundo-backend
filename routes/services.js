@@ -1,57 +1,302 @@
-// routes/services.js
-import { db, newId } from "../db.js";
-import { HttpError } from "../http-utils.js";
+// server.js
+// Punto de entrada del backend. Un solo proceso Node, cero dependencias de
+// npm (usa node:http y node:sqlite, ambos nativos desde Node 22.5+).
+// Arrancar con: node server.js  (variable de entorno PORT opcional).
 
-const GRATIS_SERVICE_LIMIT = 3;
+import { createServer } from "node:http";
+import { authenticate } from "./auth.js";
+import { authenticateClient } from "./auth-cliente.js";
+import { sendJSON, readJSONBody, HttpError } from "./http-utils.js";
 
-export function listServices(user) {
-  return db.prepare("SELECT * FROM services WHERE user_id = ? ORDER BY created_at ASC").all(user.id);
-}
+import * as authRoutes from "./routes/auth.js";
+import * as clientAuthRoutes from "./routes/clientAuth.js";
+import * as clientRoutes from "./routes/clients.js";
+import * as chartRoutes from "./routes/charts.js";
+import * as serviceRoutes from "./routes/services.js";
+import * as apptRoutes from "./routes/appointments.js";
+import * as paymentRoutes from "./routes/payments.js";
+import * as paymentSettingsRoutes from "./routes/paymentSettings.js";
+import * as orderRoutes from "./routes/orders.js";
+import * as ephemerisRoutes from "./routes/ephemeris.js";
+import * as synastryRoutes from "./routes/synastries.js";
+import * as backupRoutes from "./routes/backup.js";
+import * as subscriptionRoutes from "./routes/subscriptions.js";
+import * as adminRoutes from "./routes/admin.js";
 
-export function createService(user, body) {
-  if (!body.name) throw new HttpError(400, "El servicio necesita un nombre.");
+const PORT = process.env.PORT || 3001;
 
-  if (user.plan === "gratis") {
-    const count = db.prepare("SELECT COUNT(*) as n FROM services WHERE user_id = ?").get(user.id).n;
-    if (count >= GRATIS_SERVICE_LIMIT) {
-      throw new HttpError(403, `El plan Gratis permite hasta ${GRATIS_SERVICE_LIMIT} servicios — pasá a Pro o Premium para cargar servicios ilimitados.`);
-    }
+// ORIGIN_ALLOWLIST: dominios reales desde donde se puede llamar a esta API,
+// separados por coma en la variable de entorno ALLOWED_ORIGINS de Railway
+// (ej: "https://astromundo.pages.dev,https://tudominio.com"). Sin esa
+// variable cargada, cae a *: sigue funcionando, pero sin la restricción real
+// — hay que cargarla en Railway para que esto sirva de algo.
+const ORIGIN_ALLOWLIST = (process.env.ALLOWED_ORIGINS || "")
+  .split(",").map(o => o.trim()).filter(Boolean);
+
+function aplicarHeadersDeSeguridad(req, res) {
+  const origin = req.headers.origin;
+  if (ORIGIN_ALLOWLIST.length === 0) {
+    // Sin la variable configurada: mismo comportamiento de antes (abierto a
+    // cualquier origen), para no romper nada en el primer despliegue de
+    // este cambio. En cuanto se cargue ALLOWED_ORIGINS, se restringe solo.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (origin && ORIGIN_ALLOWLIST.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
   }
+  // Si hay lista cargada y el origen del pedido NO está en ella, no se pone
+  // el header — el navegador bloquea la respuesta del lado del que pidió.
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
-  const id = newId("s");
-  db.prepare(`INSERT INTO services (id, user_id, name, description, modality, duration_minutes, price_cents, is_active)
-              VALUES (?,?,?,?,?,?,?,1)`).run(
-    id, user.id, body.name, body.desc || body.description || "", body.modality || "video",
-    body.duration ?? body.duration_minutes ?? null, body.price ?? body.price_cents ?? 0
-  );
-  return db.prepare("SELECT * FROM services WHERE id = ?").get(id);
+  // Headers de seguridad — esta API solo devuelve JSON (nunca HTML), así
+  // que no hace falta una Content-Security-Policy pensada para páginas;
+  // estos aplican igual y son la protección de base para cualquier API.
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
 }
 
-export function updateService(user, serviceId, body) {
-  const existing = db.prepare("SELECT * FROM services WHERE id = ? AND user_id = ?").get(serviceId, user.id);
-  if (!existing) throw new HttpError(404, "Servicio no encontrado.");
-  const merged = {
-    name: body.name ?? existing.name,
-    description: body.desc ?? body.description ?? existing.description,
-    modality: body.modality ?? existing.modality,
-    duration_minutes: body.duration ?? body.duration_minutes ?? existing.duration_minutes,
-    price_cents: body.price ?? body.price_cents ?? existing.price_cents,
-    is_active: body.active != null ? (body.active ? 1 : 0) : existing.is_active,
-  };
-  db.prepare("UPDATE services SET name=?, description=?, modality=?, duration_minutes=?, price_cents=?, is_active=? WHERE id=?")
-    .run(merged.name, merged.description, merged.modality, merged.duration_minutes, merged.price_cents, merged.is_active, serviceId);
-  return db.prepare("SELECT * FROM services WHERE id = ?").get(serviceId);
+function requireAuth(req) {
+  const user = authenticate(req);
+  if (!user) throw new HttpError(401, "No autenticado — mandá el header Authorization: Bearer <token>.");
+  return user;
 }
 
-export function toggleService(user, serviceId) {
-  const existing = db.prepare("SELECT * FROM services WHERE id = ? AND user_id = ?").get(serviceId, user.id);
-  if (!existing) throw new HttpError(404, "Servicio no encontrado.");
-  db.prepare("UPDATE services SET is_active = ? WHERE id = ?").run(existing.is_active ? 0 : 1, serviceId);
-  return db.prepare("SELECT * FROM services WHERE id = ?").get(serviceId);
+function requireClientAuth(req) {
+  const account = authenticateClient(req);
+  if (!account) throw new HttpError(401, "No autenticado — mandá el header X-Client-Auth: Bearer <token>.");
+  return account;
 }
 
-export function deleteService(user, serviceId) {
-  const result = db.prepare("DELETE FROM services WHERE id = ? AND user_id = ?").run(serviceId, user.id);
-  if (result.changes === 0) throw new HttpError(404, "Servicio no encontrado.");
-  return { deleted: true };
-}
+const server = createServer(async (req, res) => {
+  aplicarHeadersDeSeguridad(req, res);
+  if (req.method === "OPTIONS") { sendJSON(res, 204, {}); return; }
+
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const parts = url.pathname.split("/").filter(Boolean); // ["api","clients","c_123"]
+
+  try {
+    if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
+
+    // ---- /api/health ----
+    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "admin-v4" }); return; }
+
+    // ---- /api/auth/* ----
+    if (parts[1] === "auth") {
+      if (parts[2] === "register" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await authRoutes.register(body)); return;
+      }
+      if (parts[2] === "login" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.login(body)); return;
+      }
+      if (parts[2] === "me" && req.method === "GET") {
+        sendJSON(res, 200, await authRoutes.me(req)); return;
+      }
+      if (parts[2] === "plan" && req.method === "PUT") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.updatePlan(user, body.plan)); return;
+      }
+      if (parts[2] === "profile" && req.method === "PUT") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.updateProfile(user, body)); return;
+      }
+      if (parts[2] === "password" && req.method === "PUT") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.changePassword(user, body)); return;
+      }
+      if (parts[2] === "account" && req.method === "DELETE") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.deleteAccount(user, body)); return;
+      }
+      // Verificación en dos pasos (TOTP). El segundo paso del login
+      // (completeLogin2fa) es público a propósito — a esa altura todavía
+      // no hay una sesión real, es lo que la termina de crear.
+      if (parts[2] === "2fa" && parts[3] === "login" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.completeLogin2fa(body)); return;
+      }
+      if (parts[2] === "2fa" && parts[3] === "setup" && req.method === "POST") {
+        const user = requireAuth(req);
+        sendJSON(res, 200, await authRoutes.setupTotp(user)); return;
+      }
+      if (parts[2] === "2fa" && parts[3] === "confirm" && req.method === "POST") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.confirmTotp(user, body)); return;
+      }
+      if (parts[2] === "2fa" && req.method === "DELETE") {
+        const user = requireAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await authRoutes.disableTotpRoute(user, body)); return;
+      }
+    }
+
+    // ---- /api/client-auth/* (cuenta de CLIENTE FINAL, sección aparte de
+    // la app -- ver auth-cliente.js para el porqué de la sesión separada) ----
+    if (parts[1] === "client-auth") {
+      if (parts[2] === "register" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await clientAuthRoutes.registerClient(body)); return;
+      }
+      if (parts[2] === "login" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.loginClient(body)); return;
+      }
+      if (parts[2] === "confirm-link" && req.method === "POST") {
+        const account = requireClientAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.confirmLink(account, body)); return;
+      }
+    }
+
+    // ---- /api/clients ----
+    if (parts[1] === "clients") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, clientRoutes.listClients(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, clientRoutes.createClient(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, clientRoutes.updateClient(user, parts[2], await readJSONBody(req))); return; }
+    }
+
+    // ---- /api/charts ----
+    if (parts[1] === "charts") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, chartRoutes.listCharts(user, url.searchParams.get("clientId"))); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, chartRoutes.saveChart(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, chartRoutes.getChart(user, parts[2])); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, chartRoutes.deleteChart(user, parts[2])); return; }
+      if (parts.length === 4 && parts[3] === "interpretation" && req.method === "PUT") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, chartRoutes.saveInterpretation(user, parts[2], body.text)); return;
+      }
+    }
+
+    // ---- /api/services ----
+    if (parts[1] === "services") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, serviceRoutes.listServices(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, serviceRoutes.createService(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, serviceRoutes.updateService(user, parts[2], await readJSONBody(req))); return; }
+      if (parts.length === 4 && parts[3] === "toggle" && req.method === "POST") { sendJSON(res, 200, serviceRoutes.toggleService(user, parts[2])); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, serviceRoutes.deleteService(user, parts[2])); return; }
+    }
+
+    // ---- /api/appointments ----
+    if (parts[1] === "appointments") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, apptRoutes.listAppointments(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, apptRoutes.createAppointment(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, apptRoutes.updateAppointment(user, parts[2], await readJSONBody(req))); return; }
+    }
+
+    // ---- /api/payments ----
+    if (parts[1] === "payments") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, paymentRoutes.listPayments(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, paymentRoutes.createPayment(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && parts[2] === "summary" && req.method === "GET") { sendJSON(res, 200, paymentRoutes.paymentsSummary(user)); return; }
+    }
+
+    // ---- /api/payment-settings (el astrólogo configura SUS credenciales de cobro) ----
+    if (parts[1] === "payment-settings") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, paymentSettingsRoutes.getSettings(user)); return; }
+      if (parts.length === 2 && req.method === "PUT") { sendJSON(res, 200, paymentSettingsRoutes.updateSettings(user, await readJSONBody(req))); return; }
+    }
+
+    // ---- /api/orders (el astrólogo ve sus órdenes / confirma transferencias) ----
+    if (parts[1] === "orders") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, orderRoutes.listOrders(user)); return; }
+      if (parts.length === 4 && parts[3] === "confirm-transfer" && req.method === "POST") {
+        sendJSON(res, 200, orderRoutes.confirmBankTransfer(user, parts[2])); return;
+      }
+    }
+
+    // ---- /api/ephemeris/centaurs?date=YYYY-MM-DD (Quirón, Folo, Neso vía JPL Horizons real) ----
+    if (parts[1] === "ephemeris" && parts[2] === "centaurs" && req.method === "GET") {
+      requireAuth(req);
+      sendJSON(res, 200, await ephemerisRoutes.getCentaurPositions(url.searchParams.get("date"))); return;
+    }
+
+    // ---- /api/synastries ----
+    if (parts[1] === "synastries") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.listSynastries(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, synastryRoutes.createSynastry(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.getSynastry(user, parts[2])); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, synastryRoutes.deleteSynastry(user, parts[2])); return; }
+    }
+
+    // ---- /api/backup (cada astrólogo descarga SUS propios datos) ----
+    if (parts[1] === "backup" && req.method === "GET") {
+      const user = requireAuth(req);
+      sendJSON(res, 200, backupRoutes.exportUserData(user)); return;
+    }
+
+    // ---- /api/subscriptions (el astrólogo paga de verdad para pasar a Pro/Premium) ----
+    if (parts[1] === "subscriptions") {
+      const user = requireAuth(req);
+      const baseUrl = `${url.protocol}//${req.headers.host}`;
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, subscriptionRoutes.listMySubscriptions(user)); return; }
+      if (parts.length === 3 && parts[2] === "checkout" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await subscriptionRoutes.createSubscriptionCheckout(user, body.plan, baseUrl)); return;
+      }
+    }
+
+    // ---- /api/admin/* (solo el dueño de la plataforma) ----
+    if (parts[1] === "admin") {
+      const user = requireAuth(req);
+      if (parts[2] === "astrologers" && req.method === "GET") { sendJSON(res, 200, adminRoutes.listAllAstrologers(user)); return; }
+      if (parts[2] === "stats" && req.method === "GET") { sendJSON(res, 200, adminRoutes.platformStats(user)); return; }
+      if (parts[2] === "astrologers" && parts[3] && parts[4] === "plan" && req.method === "PUT") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, adminRoutes.setUserPlan(user, parts[3], body.plan)); return;
+      }
+    }
+
+    // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
+    if (parts[1] === "public") {
+      const baseUrl = `${url.protocol}//${req.headers.host}`;
+      if (parts[2] === "services" && parts.length === 4 && req.method === "GET") {
+        sendJSON(res, 200, orderRoutes.listPublicServices(parts[3])); return;
+      }
+      if (parts[2] === "orders" && parts.length === 4 && req.method === "POST") {
+        sendJSON(res, 201, await orderRoutes.createOrder(parts[3], await readJSONBody(req), baseUrl)); return;
+      }
+      if (parts[2] === "webhooks" && parts[3] === "mercadopago" && req.method === "POST") {
+        const body = await readJSONBody(req).catch(() => ({}));
+        await orderRoutes.handleMercadopagoWebhook(url.searchParams, req.headers, body);
+        sendJSON(res, 200, { received: true }); return; // siempre 200, MP reintenta si no
+      }
+      if (parts[2] === "webhooks" && parts[3] === "platform-subscription" && req.method === "POST") {
+        const body = await readJSONBody(req).catch(() => ({}));
+        await subscriptionRoutes.handleSubscriptionWebhook(url.searchParams, req.headers, body);
+        sendJSON(res, 200, { received: true }); return;
+      }
+      if (parts[2] === "webhooks" && parts[3] === "paypal" && parts[4] === "capture" && req.method === "GET") {
+        const result = await orderRoutes.capturePaypalOrder(url.searchParams.get("orderId"));
+        res.writeHead(302, { Location: `/reservar-gracias.html?status=${result.status}` });
+        res.end();
+        return;
+      }
+    }
+
+    sendJSON(res, 404, { error: "Ruta no encontrada." });
+  } catch (err) {
+    if (err instanceof HttpError) { sendJSON(res, err.status, { error: err.message }); return; }
+    console.error(err);
+    sendJSON(res, 500, { error: "Error interno del servidor." });
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
+});
