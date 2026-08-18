@@ -24,7 +24,12 @@ export function platformStats(user) {
   const byPlan = db.prepare("SELECT plan, COUNT(*) as count FROM users GROUP BY plan").all();
   const totalUsers = db.prepare("SELECT COUNT(*) as count FROM users").get().count;
   const activeSubs = db.prepare("SELECT COUNT(*) as count, COALESCE(SUM(amount_cents),0) as total FROM platform_subscriptions WHERE status='active'").get();
-  return { totalUsers, byPlan, activeSubscriptions: activeSubs.count, monthlyRecurringRevenueCents: activeSubs.total };
+  // COALESCE a "directo" -- alguien que se registró sin pasar por ningún
+  // link con ?ref=, por ejemplo escribiendo la URL a mano o desde un
+  // buscador. Así el desglose siempre suma el total de usuarios, sin un
+  // grupo "null" confuso en la pantalla.
+  const bySource = db.prepare("SELECT COALESCE(signup_source, 'directo') as source, COUNT(*) as count FROM users GROUP BY source ORDER BY count DESC").all();
+  return { totalUsers, byPlan, bySource, activeSubscriptions: activeSubs.count, monthlyRecurringRevenueCents: activeSubs.total };
 }
 
 const PLANES_VALIDOS = ["gratis", "pro", "premium"];
