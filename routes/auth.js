@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword, createSession, authenticate, publicUser, 
 import { HttpError } from "../http-utils.js";
 
 export async function register(body) {
-  const { email, password, name } = body;
+  const { email, password, name, source } = body;
   if (!email || !password || !name) throw new HttpError(400, "Faltan email, password o name.");
   if (password.length < 8) throw new HttpError(400, "La contraseña necesita al menos 8 caracteres.");
 
@@ -15,8 +15,8 @@ export async function register(body) {
 
   const { hash, salt } = hashPassword(password);
   const id = newId("u");
-  db.prepare("INSERT INTO users (id, email, password_hash, password_salt, name) VALUES (?, ?, ?, ?, ?)")
-    .run(id, email.toLowerCase(), hash, salt, name);
+  db.prepare("INSERT INTO users (id, email, password_hash, password_salt, name, signup_source) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, email.toLowerCase(), hash, salt, name, source || null);
 
   // Servicios de ejemplo para que la cuenta nueva no arranque completamente vacía.
   const defaults = [
