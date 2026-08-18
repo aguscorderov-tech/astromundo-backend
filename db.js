@@ -257,6 +257,7 @@ const migrations = [
   "ALTER TABLE users ADD COLUMN bio TEXT",
   "ALTER TABLE users ADD COLUMN totp_secret TEXT",
   "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE users ADD COLUMN signup_source TEXT",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
