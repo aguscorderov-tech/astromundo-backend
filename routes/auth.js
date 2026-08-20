@@ -1,277 +1,208 @@
-// server.js
-// Punto de entrada del backend. Un solo proceso Node, cero dependencias de
-// npm (usa node:http y node:sqlite, ambos nativos desde Node 22.5+).
-// Arrancar con: node server.js  (variable de entorno PORT opcional).
+// routes/auth.js
+import { db, newId } from "../db.js";
+import { hashPassword, verifyPassword, createSession, authenticate, publicUser, grantAdminIfOwner,
+  verificarLimiteIntentos, registrarIntentoFallido, limpiarIntentos, registrarEvento,
+  iniciarSetupTotp, confirmarSetupTotp, desactivarTotp, crearLogin2faPendiente, completarLoginConTotp } from "../auth.js";
+import { HttpError } from "../http-utils.js";
 
-import { createServer } from "node:http";
-import { authenticate } from "./auth.js";
-import { sendJSON, readJSONBody, HttpError } from "./http-utils.js";
+export async function register(body) {
+  const { email, password, name, source } = body;
+  if (!email || !password || !name) throw new HttpError(400, "Faltan email, password o name.");
+  if (password.length < 8) throw new HttpError(400, "La contraseña necesita al menos 8 caracteres.");
 
-import * as authRoutes from "./routes/auth.js";
-import * as clientRoutes from "./routes/clients.js";
-import * as chartRoutes from "./routes/charts.js";
-import * as serviceRoutes from "./routes/services.js";
-import * as apptRoutes from "./routes/appointments.js";
-import * as paymentRoutes from "./routes/payments.js";
-import * as paymentSettingsRoutes from "./routes/paymentSettings.js";
-import * as orderRoutes from "./routes/orders.js";
-import * as ephemerisRoutes from "./routes/ephemeris.js";
-import * as synastryRoutes from "./routes/synastries.js";
-import * as backupRoutes from "./routes/backup.js";
-import * as subscriptionRoutes from "./routes/subscriptions.js";
-import * as adminRoutes from "./routes/admin.js";
+  const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase());
+  if (existing) throw new HttpError(409, "Ya existe una cuenta con ese email.");
 
-const PORT = process.env.PORT || 3001;
+  const { hash, salt } = hashPassword(password);
+  const id = newId("u");
+  db.prepare("INSERT INTO users (id, email, password_hash, password_salt, name, signup_source) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, email.toLowerCase(), hash, salt, name, source || null);
 
-// ORIGIN_ALLOWLIST: dominios reales desde donde se puede llamar a esta API,
-// separados por coma en la variable de entorno ALLOWED_ORIGINS de Railway
-// (ej: "https://astromundo.pages.dev,https://tudominio.com"). Sin esa
-// variable cargada, cae a *: sigue funcionando, pero sin la restricción real
-// — hay que cargarla en Railway para que esto sirva de algo.
-const ORIGIN_ALLOWLIST = (process.env.ALLOWED_ORIGINS || "")
-  .split(",").map(o => o.trim()).filter(Boolean);
-
-function aplicarHeadersDeSeguridad(req, res) {
-  const origin = req.headers.origin;
-  if (ORIGIN_ALLOWLIST.length === 0) {
-    // Sin la variable configurada: mismo comportamiento de antes (abierto a
-    // cualquier origen), para no romper nada en el primer despliegue de
-    // este cambio. En cuanto se cargue ALLOWED_ORIGINS, se restringe solo.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  } else if (origin && ORIGIN_ALLOWLIST.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
+  // Servicios de ejemplo para que la cuenta nueva no arranque completamente vacía.
+  const defaults = [
+    ["Informe de carta natal", "Lectura completa en PDF: personalidad, propósito y potenciales.", "async", null, 28000],
+    ["Sesión en vivo · 45 min", "Videollamada para profundizar carta natal o tránsitos actuales.", "video", 45, 35000],
+  ];
+  for (const [n, d, m, dur, p] of defaults) {
+    db.prepare("INSERT INTO services (id, user_id, name, description, modality, duration_minutes, price_cents) VALUES (?,?,?,?,?,?,?)")
+      .run(newId("s"), id, n, d, m, dur, p);
   }
-  // Si hay lista cargada y el origen del pedido NO está en ella, no se pone
-  // el header — el navegador bloquea la respuesta del lado del que pidió.
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
-  // Headers de seguridad — esta API solo devuelve JSON (nunca HTML), así
-  // que no hace falta una Content-Security-Policy pensada para páginas;
-  // estos aplican igual y son la protección de base para cualquier API.
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+  const token = createSession(id);
+  let user = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+  user = grantAdminIfOwner(user);
+  return { token, user: publicUser(user) };
 }
 
-function requireAuth(req) {
-  const user = authenticate(req);
-  if (!user) throw new HttpError(401, "No autenticado — mandá el header Authorization: Bearer <token>.");
-  return user;
+export async function login(body) {
+  const { email, password } = body;
+  if (!email || !password) throw new HttpError(400, "Faltan email o password.");
+  const identifier = String(email).toLowerCase();
+
+  verificarLimiteIntentos(identifier);
+
+  let user = db.prepare("SELECT * FROM users WHERE email = ?").get(identifier);
+  if (!user || !verifyPassword(password, user.password_hash, user.password_salt)) {
+    registrarIntentoFallido(identifier);
+    registrarEvento("login_failed", { email: identifier });
+    throw new HttpError(401, "Email o contraseña incorrectos.");
+  }
+  limpiarIntentos(identifier);
+  user = grantAdminIfOwner(user);
+
+  if (user.totp_enabled) {
+    // No se crea sesión real todavía — el segundo paso (completeLogin2fa)
+    // es el que de verdad la crea, una vez confirmado el código.
+    const pendingToken = crearLogin2faPendiente(user.id);
+    return { requiresTotp: true, pendingToken };
+  }
+
+  registrarEvento("login_success", { userId: user.id, email: user.email });
+  const token = createSession(user.id);
+  return { token, user: publicUser(user) };
 }
 
-const server = createServer(async (req, res) => {
-  aplicarHeadersDeSeguridad(req, res);
-  if (req.method === "OPTIONS") { sendJSON(res, 204, {}); return; }
+/** Segundo paso del login cuando la cuenta tiene 2FA activado — recibe el
+    token corto de login() y el código de la app autenticadora. */
+export async function completeLogin2fa(body) {
+  const { pendingToken, code } = body;
+  if (!pendingToken || !code) throw new HttpError(400, "Faltan el token o el código.");
+  const user = completarLoginConTotp(pendingToken, code);
+  const token = createSession(user.id);
+  return { token, user: publicUser(user) };
+}
 
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const parts = url.pathname.split("/").filter(Boolean); // ["api","clients","c_123"]
+export async function setupTotp(user) {
+  return iniciarSetupTotp(user);
+}
 
+export async function confirmTotp(user, body) {
+  return confirmarSetupTotp(user, body.code);
+}
+
+export async function disableTotpRoute(user, body) {
+  if (!body.password) throw new HttpError(400, "Confirmá tu contraseña.");
+  return desactivarTotp(user, body.password);
+}
+
+export async function me(req) {
+  let user = authenticate(req);
+  if (!user) throw new HttpError(401, "No autenticado.");
+  user = grantAdminIfOwner(user);
+  return publicUser(user);
+}
+
+const VALID_PLANS = ["gratis", "pro", "premium"];
+export async function updatePlan(user, planId) {
+  if (!VALID_PLANS.includes(planId)) throw new HttpError(400, "Plan no reconocido.");
+  // Pasar a un plan pago ahora es un pago real (ver routes/subscriptions.js)
+  // — este endpoint solo sigue sirviendo para volver al plan Gratis, que no
+  // necesita cobrar nada.
+  if (planId !== "gratis") throw new HttpError(400, "Para pasar a un plan pago, usá el checkout de suscripción — este cambio directo ya no está disponible.");
+  db.prepare("UPDATE users SET plan = ? WHERE id = ?").run(planId, user.id);
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+  return publicUser(updated);
+}
+
+const MAX_BYTES_FOTO = 2 * 1024 * 1024; // 2MB reales — de sobra para una foto de perfil ya achicada
+
+/** No alcanza con mirar el "data:image/jpeg;base64," del principio — eso es
+    solo una etiqueta que cualquiera puede escribir. Se decodifica el
+    base64 de verdad y se revisan los primeros bytes contra la firma real
+    de cada formato (los "magic bytes"), para confirmar que el contenido
+    sea realmente una imagen de ese tipo, no cualquier otra cosa disfrazada. */
+export function validarFotoPerfil(dataUri) {
+  if (typeof dataUri !== "string") throw new HttpError(400, "La foto de perfil no tiene un formato válido.");
+  const match = dataUri.match(/^data:image\/(jpeg|jpg|png|webp|gif);base64,(.+)$/);
+  if (!match) throw new HttpError(400, "La foto de perfil tiene que ser una imagen (jpeg, png, webp o gif) en formato data URI.");
+  const [, tipo, base64Payload] = match;
+
+  const bytesAprox = base64Payload.length * 0.75;
+  if (bytesAprox > MAX_BYTES_FOTO) throw new HttpError(400, "La foto de perfil no puede superar los 2MB.");
+
+  let buffer;
   try {
-    if (parts[0] !== "api") { sendJSON(res, 404, { error: "Ruta no encontrada." }); return; }
-
-    // ---- /api/health ----
-    if (parts[1] === "health") { sendJSON(res, 200, { ok: true, service: "astromundo-backend", version: "admin-v4" }); return; }
-
-    // ---- /api/auth/* ----
-    if (parts[1] === "auth") {
-      if (parts[2] === "register" && req.method === "POST") {
-        const body = await readJSONBody(req);
-        sendJSON(res, 201, await authRoutes.register(body)); return;
-      }
-      if (parts[2] === "login" && req.method === "POST") {
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.login(body)); return;
-      }
-      if (parts[2] === "me" && req.method === "GET") {
-        sendJSON(res, 200, await authRoutes.me(req)); return;
-      }
-      if (parts[2] === "plan" && req.method === "PUT") {
-        const user = requireAuth(req);
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.updatePlan(user, body.plan)); return;
-      }
-      if (parts[2] === "profile" && req.method === "PUT") {
-        const user = requireAuth(req);
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.updateProfile(user, body)); return;
-      }
-      if (parts[2] === "password" && req.method === "PUT") {
-        const user = requireAuth(req);
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.changePassword(user, body)); return;
-      }
-      if (parts[2] === "account" && req.method === "DELETE") {
-        const user = requireAuth(req);
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.deleteAccount(user, body)); return;
-      }
-      // Verificación en dos pasos (TOTP). El segundo paso del login
-      // (completeLogin2fa) es público a propósito — a esa altura todavía
-      // no hay una sesión real, es lo que la termina de crear.
-      if (parts[2] === "2fa" && parts[3] === "login" && req.method === "POST") {
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.completeLogin2fa(body)); return;
-      }
-      if (parts[2] === "2fa" && parts[3] === "setup" && req.method === "POST") {
-        const user = requireAuth(req);
-        sendJSON(res, 200, await authRoutes.setupTotp(user)); return;
-      }
-      if (parts[2] === "2fa" && parts[3] === "confirm" && req.method === "POST") {
-        const user = requireAuth(req);
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.confirmTotp(user, body)); return;
-      }
-      if (parts[2] === "2fa" && req.method === "DELETE") {
-        const user = requireAuth(req);
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await authRoutes.disableTotpRoute(user, body)); return;
-      }
-    }
-
-    // ---- /api/clients ----
-    if (parts[1] === "clients") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, clientRoutes.listClients(user)); return; }
-      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, clientRoutes.createClient(user, await readJSONBody(req))); return; }
-      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, clientRoutes.updateClient(user, parts[2], await readJSONBody(req))); return; }
-    }
-
-    // ---- /api/charts ----
-    if (parts[1] === "charts") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, chartRoutes.listCharts(user, url.searchParams.get("clientId"))); return; }
-      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, chartRoutes.saveChart(user, await readJSONBody(req))); return; }
-      if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, chartRoutes.getChart(user, parts[2])); return; }
-      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, chartRoutes.deleteChart(user, parts[2])); return; }
-      if (parts.length === 4 && parts[3] === "interpretation" && req.method === "PUT") {
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, chartRoutes.saveInterpretation(user, parts[2], body.text)); return;
-      }
-    }
-
-    // ---- /api/services ----
-    if (parts[1] === "services") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, serviceRoutes.listServices(user)); return; }
-      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, serviceRoutes.createService(user, await readJSONBody(req))); return; }
-      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, serviceRoutes.updateService(user, parts[2], await readJSONBody(req))); return; }
-      if (parts.length === 4 && parts[3] === "toggle" && req.method === "POST") { sendJSON(res, 200, serviceRoutes.toggleService(user, parts[2])); return; }
-      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, serviceRoutes.deleteService(user, parts[2])); return; }
-    }
-
-    // ---- /api/appointments ----
-    if (parts[1] === "appointments") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, apptRoutes.listAppointments(user)); return; }
-      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, apptRoutes.createAppointment(user, await readJSONBody(req))); return; }
-      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, apptRoutes.updateAppointment(user, parts[2], await readJSONBody(req))); return; }
-    }
-
-    // ---- /api/payments ----
-    if (parts[1] === "payments") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, paymentRoutes.listPayments(user)); return; }
-      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, paymentRoutes.createPayment(user, await readJSONBody(req))); return; }
-      if (parts.length === 3 && parts[2] === "summary" && req.method === "GET") { sendJSON(res, 200, paymentRoutes.paymentsSummary(user)); return; }
-    }
-
-    // ---- /api/payment-settings (el astrólogo configura SUS credenciales de cobro) ----
-    if (parts[1] === "payment-settings") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, paymentSettingsRoutes.getSettings(user)); return; }
-      if (parts.length === 2 && req.method === "PUT") { sendJSON(res, 200, paymentSettingsRoutes.updateSettings(user, await readJSONBody(req))); return; }
-    }
-
-    // ---- /api/orders (el astrólogo ve sus órdenes / confirma transferencias) ----
-    if (parts[1] === "orders") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, orderRoutes.listOrders(user)); return; }
-      if (parts.length === 4 && parts[3] === "confirm-transfer" && req.method === "POST") {
-        sendJSON(res, 200, orderRoutes.confirmBankTransfer(user, parts[2])); return;
-      }
-    }
-
-    // ---- /api/ephemeris/minor-bodies?date=YYYY-MM-DD (Quirón, Folo, Neso,
-    // Chariklo, Palas, Juno, Vesta vía JPL Horizons real) ----
-    if (parts[1] === "ephemeris" && parts[2] === "minor-bodies" && req.method === "GET") {
-      requireAuth(req);
-      sendJSON(res, 200, await ephemerisRoutes.getMinorBodyPositions(url.searchParams.get("date"))); return;
-    }
-
-    // ---- /api/synastries ----
-    if (parts[1] === "synastries") {
-      const user = requireAuth(req);
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.listSynastries(user)); return; }
-      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, synastryRoutes.createSynastry(user, await readJSONBody(req))); return; }
-      if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.getSynastry(user, parts[2])); return; }
-      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, synastryRoutes.deleteSynastry(user, parts[2])); return; }
-    }
-
-    // ---- /api/backup (cada astrólogo descarga SUS propios datos) ----
-    if (parts[1] === "backup" && req.method === "GET") {
-      const user = requireAuth(req);
-      sendJSON(res, 200, backupRoutes.exportUserData(user)); return;
-    }
-
-    // ---- /api/subscriptions (el astrólogo paga de verdad para pasar a Pro/Premium) ----
-    if (parts[1] === "subscriptions") {
-      const user = requireAuth(req);
-      const baseUrl = `${url.protocol}//${req.headers.host}`;
-      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, subscriptionRoutes.listMySubscriptions(user)); return; }
-      if (parts.length === 3 && parts[2] === "checkout" && req.method === "POST") {
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, await subscriptionRoutes.createSubscriptionCheckout(user, body.plan, baseUrl)); return;
-      }
-    }
-
-    // ---- /api/admin/* (solo el dueño de la plataforma) ----
-    if (parts[1] === "admin") {
-      const user = requireAuth(req);
-      if (parts[2] === "astrologers" && req.method === "GET") { sendJSON(res, 200, adminRoutes.listAllAstrologers(user)); return; }
-      if (parts[2] === "stats" && req.method === "GET") { sendJSON(res, 200, adminRoutes.platformStats(user)); return; }
-      if (parts[2] === "astrologers" && parts[3] && parts[4] === "plan" && req.method === "PUT") {
-        const body = await readJSONBody(req);
-        sendJSON(res, 200, adminRoutes.setUserPlan(user, parts[3], body.plan)); return;
-      }
-    }
-
-    // ---- /api/public/* (SIN autenticación — lo usa un cliente potencial, no el astrólogo) ----
-    if (parts[1] === "public") {
-      const baseUrl = `${url.protocol}//${req.headers.host}`;
-      if (parts[2] === "services" && parts.length === 4 && req.method === "GET") {
-        sendJSON(res, 200, orderRoutes.listPublicServices(parts[3])); return;
-      }
-      if (parts[2] === "orders" && parts.length === 4 && req.method === "POST") {
-        sendJSON(res, 201, await orderRoutes.createOrder(parts[3], await readJSONBody(req), baseUrl)); return;
-      }
-      if (parts[2] === "webhooks" && parts[3] === "mercadopago" && req.method === "POST") {
-        const body = await readJSONBody(req).catch(() => ({}));
-        await orderRoutes.handleMercadopagoWebhook(url.searchParams, req.headers, body);
-        sendJSON(res, 200, { received: true }); return; // siempre 200, MP reintenta si no
-      }
-      if (parts[2] === "webhooks" && parts[3] === "platform-subscription" && req.method === "POST") {
-        const body = await readJSONBody(req).catch(() => ({}));
-        await subscriptionRoutes.handleSubscriptionWebhook(url.searchParams, req.headers, body);
-        sendJSON(res, 200, { received: true }); return;
-      }
-      if (parts[2] === "webhooks" && parts[3] === "paypal" && parts[4] === "capture" && req.method === "GET") {
-        const result = await orderRoutes.capturePaypalOrder(url.searchParams.get("orderId"));
-        res.writeHead(302, { Location: `/reservar-gracias.html?status=${result.status}` });
-        res.end();
-        return;
-      }
-    }
-
-    sendJSON(res, 404, { error: "Ruta no encontrada." });
-  } catch (err) {
-    if (err instanceof HttpError) { sendJSON(res, err.status, { error: err.message }); return; }
-    console.error(err);
-    sendJSON(res, 500, { error: "Error interno del servidor." });
+    buffer = Buffer.from(base64Payload, "base64");
+  } catch {
+    throw new HttpError(400, "La foto de perfil no es un base64 válido.");
   }
-});
+  if (buffer.length < 12) throw new HttpError(400, "El archivo es demasiado chico para ser una imagen real.");
 
-server.listen(PORT, () => {
-  console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
-});
+  const firmaValida =
+    (/jpe?g/.test(tipo) && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) ||
+    (tipo === "png" && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) ||
+    (tipo === "gif" && buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) ||
+    (tipo === "webp" && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP");
+
+  if (!firmaValida) throw new HttpError(400, "El contenido no coincide con el tipo de imagen declarado — no parece ser una imagen real.");
+
+  return dataUri;
+}
+
+export async function updateProfile(user, body) {
+  // Actualización PARCIAL de verdad: antes, mandar solo {bio} sin
+  // professionalName lo pisaba con NULL (professionalName||null, sin
+  // chequear si el campo vino siquiera) — acá cada columna se toca SOLO si
+  // esa clave está presente en el body. photoUrl:null sigue funcionando
+  // para "sacar la foto" (el frontend ya lo usa así), porque la clave SÍ
+  // está presente, solo que su valor es null.
+  const campos = [];
+  const valores = [];
+  if ("professionalName" in body) { campos.push("professional_name = ?"); valores.push(body.professionalName || null); }
+  if ("photoUrl" in body) {
+    const foto = body.photoUrl ? validarFotoPerfil(body.photoUrl) : null;
+    campos.push("photo_url = ?"); valores.push(foto);
+  }
+  if ("bio" in body) { campos.push("bio = ?"); valores.push(body.bio || null); }
+  if (campos.length > 0) {
+    valores.push(user.id);
+    db.prepare(`UPDATE users SET ${campos.join(", ")} WHERE id = ?`).run(...valores);
+  }
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+  return publicUser(updated);
+
+}
+
+export async function changePassword(user, body) {
+  const { currentPassword, newPassword } = body;
+  if (!currentPassword || !newPassword) throw new HttpError(400, "Faltan la contraseña actual o la nueva.");
+  if (newPassword.length < 8) throw new HttpError(400, "La contraseña nueva necesita al menos 8 caracteres.");
+  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+  if (!verifyPassword(currentPassword, row.password_hash, row.password_salt)) {
+    // 403, no 401 — 401 es "tu sesión no es válida" y el frontend borra el
+    // token automáticamente apenas lo ve. Acá la sesión SÍ es válida, solo
+    // la contraseña de confirmación está mal — un 401 acá desloguearía a
+    // alguien que solo se equivocó tipeando, sin que su cuenta haya corrido
+    // ningún riesgo real.
+    throw new HttpError(403, "La contraseña actual no es correcta.");
+  }
+  const { hash, salt } = hashPassword(newPassword);
+  db.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?").run(hash, salt, user.id);
+  registrarEvento("password_changed", { userId: user.id, email: user.email });
+  return { updated: true };
+}
+
+// Derecho de supresión (Ley 25.326) — pide la contraseña de nuevo a
+// propósito: si alguien roba solo el token de sesión (por ejemplo, de un
+// dispositivo desatendido), no alcanza con eso para borrar la cuenta
+// entera. El borrado de la fila de users se propaga solo a clientes,
+// cartas, servicios, sesiones, etc. vía ON DELETE CASCADE (confirmado con
+// una prueba real) — login_attempts es la única tabla que NO cuelga de
+// user_id (usa el email como clave), así que se limpia acá aparte.
+export async function deleteAccount(user, body) {
+  const { password } = body;
+  if (!password) throw new HttpError(400, "Confirmá tu contraseña para borrar la cuenta.");
+  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(user.id);
+  if (!verifyPassword(password, row.password_hash, row.password_salt)) {
+    // Mismo motivo que en changePassword: 403, no 401, para no desloguear
+    // por error a alguien que solo tipeó mal la contraseña de confirmación.
+    throw new HttpError(403, "La contraseña no es correcta.");
+  }
+  db.prepare("DELETE FROM login_attempts WHERE identifier = ?").run(row.email);
+  // Antes del DELETE de la fila de users a propósito — así el evento queda
+  // insertado con el user_id todavía válido, y el ON DELETE SET NULL de la
+  // tabla lo deja en null automáticamente apenas se borra la cuenta.
+  registrarEvento("account_deleted", { userId: user.id, email: row.email });
+  db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+  return { deleted: true };
+}
