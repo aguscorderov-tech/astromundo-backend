@@ -5,7 +5,10 @@
 // en la que se apoya el software astrológico profesional. Reemplaza la
 // aproximación kepleriana de dos cuerpos que usábamos antes para Quirón,
 // Folo y Neso — esos tres cruzan cerca de Saturno, donde la aproximación
-// simple pierde precisión real.
+// simple pierde precisión real. Ceres, Palas, Vesta y Juno son asteroides del
+// cinturón principal (no cruzan cerca de Saturno como los centauros), pero
+// se calculan con el mismo método real acá para no mezclar dos técnicas
+// distintas de precisión desigual en la misma carta.
 //
 // Gratis, sin API key, mantenida por el Jet Propulsion Laboratory.
 
@@ -13,10 +16,19 @@ const BASE = "https://ssd.jpl.nasa.gov/api/horizons.api";
 
 // Números de cuerpo menor de JPL (el ";" al final le dice a Horizons que
 // busque en la base de cuerpos pequeños, no en la numeración de planetas).
-export const CENTAUR_COMMANDS = {
+// Los tres primeros asteroides numerados históricamente (Pallas=2, Juno=3,
+// Vesta=4 -- Ceres=1 no está en la lista, no se pidió incluirla) más los
+// cuatro centauros.
+export const MINOR_BODY_COMMANDS = {
   chiron: "2060",
   pholus: "5145",
   nessus: "7066",
+  chariklo: "10199",
+  sedna: "90377",
+  ceres: "1",
+  pallas: "2",
+  juno: "3",
+  vesta: "4",
 };
 
 function addDays(dateStr, days) {
@@ -56,13 +68,13 @@ function parseEclipticRows(text) {
   });
 }
 
-// Devuelve { lon, retrograde, speed } para un centauro en una fecha UTC
-// (YYYY-MM-DD). El día completo alcanza de sobra: estos cuerpos se mueven
-// apenas ~0.01–0.02°/día, así que ignorar la hora exacta de nacimiento
-// introduce un error de segundos de arco — muy por debajo de lo que
-// aportaba el método anterior.
-export async function getCentaurPosition(bodyKey, dateStr) {
-  const command = CENTAUR_COMMANDS[bodyKey];
+// Devuelve { lon, retrograde, speed } para un cuerpo menor en una fecha UTC
+// (YYYY-MM-DD). El día completo alcanza de sobra: incluso el más rápido de
+// estos siete (Juno) se mueve bastante menos de 1°/día, así que ignorar la
+// hora exacta de nacimiento introduce un error de segundos de arco — muy
+// por debajo de lo que aportaba el método kepleriano anterior.
+export async function getMinorBodyPosition(bodyKey, dateStr) {
+  const command = MINOR_BODY_COMMANDS[bodyKey];
   if (!command) throw new Error("Cuerpo no reconocido: " + bodyKey);
 
   const res = await fetch(buildUrl(command, dateStr));
@@ -78,18 +90,19 @@ export async function getCentaurPosition(bodyKey, dateStr) {
   return { lon: rows[0].lon, retrograde: speed < 0, speed };
 }
 
-export async function getAllCentaurPositions(dateStr) {
-  const keys = Object.keys(CENTAUR_COMMANDS);
+export async function getAllMinorBodyPositions(dateStr) {
+  const keys = Object.keys(MINOR_BODY_COMMANDS);
   const out = {};
-  // De a uno, no en paralelo — pedir los 3 al mismo tiempo puede hacer que
-  // JPL responda 503 (servidor ocupado) para alguno. Con un reintento simple
-  // por cuerpo alcanza para los 503 transitorios, que son la mayoría. Si
-  // alguno falla igual después de reintentar, se sigue con los otros dos en
-  // vez de perder los tres — mejor una carta con 2 de 3 que con ninguno.
+  // De a uno, no en paralelo — pedir los siete al mismo tiempo puede hacer
+  // que JPL responda 503 (servidor ocupado) para alguno. Con un reintento
+  // simple por cuerpo alcanza para los 503 transitorios, que son la
+  // mayoría. Si alguno falla igual después de reintentar, se sigue con
+  // los demás en vez de perder todos — mejor una carta con 6 de 7 que con
+  // ninguno.
   for (const key of keys) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        out[key] = await getCentaurPosition(key, dateStr);
+        out[key] = await getMinorBodyPosition(key, dateStr);
         break;
       } catch (e) {
         if (attempt === 0) { await new Promise(r => setTimeout(r, 800)); continue; }
