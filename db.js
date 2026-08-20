@@ -122,6 +122,8 @@ CREATE TABLE IF NOT EXISTS charts (
   lunar_return_place TEXT,
   transit_date TEXT,
   transit_natal_chart_id TEXT,
+  progressed_target_date TEXT,
+  progressed_moment TEXT,
   house_system TEXT DEFAULT 'equal',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -257,6 +259,9 @@ const migrations = [
   "ALTER TABLE users ADD COLUMN bio TEXT",
   "ALTER TABLE users ADD COLUMN totp_secret TEXT",
   "ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE charts ADD COLUMN progressed_target_date TEXT",
+  "ALTER TABLE charts ADD COLUMN progressed_moment TEXT",
+  "ALTER TABLE appointments ADD COLUMN date TEXT",
   "ALTER TABLE users ADD COLUMN signup_source TEXT",
 ];
 for (const sql of migrations) {
