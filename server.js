@@ -193,10 +193,11 @@ const server = createServer(async (req, res) => {
       }
     }
 
-    // ---- /api/ephemeris/centaurs?date=YYYY-MM-DD (Quirón, Folo, Neso vía JPL Horizons real) ----
-    if (parts[1] === "ephemeris" && parts[2] === "centaurs" && req.method === "GET") {
+    // ---- /api/ephemeris/minor-bodies?date=YYYY-MM-DD (Quirón, Folo, Neso,
+    // Chariklo, Palas, Juno, Vesta vía JPL Horizons real) ----
+    if (parts[1] === "ephemeris" && parts[2] === "minor-bodies" && req.method === "GET") {
       requireAuth(req);
-      sendJSON(res, 200, await ephemerisRoutes.getCentaurPositions(url.searchParams.get("date"))); return;
+      sendJSON(res, 200, await ephemerisRoutes.getMinorBodyPositions(url.searchParams.get("date"))); return;
     }
 
     // ---- /api/synastries ----
