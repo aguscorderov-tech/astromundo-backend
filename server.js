@@ -23,27 +23,15 @@ import * as adminRoutes from "./routes/admin.js";
 
 const PORT = process.env.PORT || 3001;
 
-// ORIGIN_ALLOWLIST: dominios reales desde donde se puede llamar a esta API,
-// separados por coma en la variable de entorno ALLOWED_ORIGINS de Railway
-// (ej: "https://astromundo.pages.dev,https://tudominio.com"). Sin esa
-// variable cargada, cae a *: sigue funcionando, pero sin la restricción real
-// — hay que cargarla en Railway para que esto sirva de algo.
-const ORIGIN_ALLOWLIST = (process.env.ALLOWED_ORIGINS || "")
-  .split(",").map(o => o.trim()).filter(Boolean);
-
+// ORIGIN_ALLOWLIST: restricción de dominios pausada temporalmente (ver
+// 20-ago-2026) -- daba "Failed to fetch" en producción de forma persistente
+// incluso con la variable bien cargada en Railway, y no había tiempo de
+// depurarlo con calma en medio de una caída real del login. Vuelve a
+// activarse más adelante, probado con cuidado antes de subir. Por ahora,
+// abierto a cualquier origen siempre -- mismo comportamiento simple y
+// confiable que tenía la app antes de que existiera esta restricción.
 function aplicarHeadersDeSeguridad(req, res) {
-  const origin = req.headers.origin;
-  if (ORIGIN_ALLOWLIST.length === 0) {
-    // Sin la variable configurada: mismo comportamiento de antes (abierto a
-    // cualquier origen), para no romper nada en el primer despliegue de
-    // este cambio. En cuanto se cargue ALLOWED_ORIGINS, se restringe solo.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  } else if (origin && ORIGIN_ALLOWLIST.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-  }
-  // Si hay lista cargada y el origen del pedido NO está en ella, no se pone
-  // el header — el navegador bloquea la respuesta del lado del que pidió.
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
