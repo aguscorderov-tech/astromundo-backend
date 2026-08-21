@@ -23,15 +23,33 @@ import * as adminRoutes from "./routes/admin.js";
 
 const PORT = process.env.PORT || 3001;
 
-// ORIGIN_ALLOWLIST: restricción de dominios pausada temporalmente (ver
-// 20-ago-2026) -- daba "Failed to fetch" en producción de forma persistente
-// incluso con la variable bien cargada en Railway, y no había tiempo de
-// depurarlo con calma en medio de una caída real del login. Vuelve a
-// activarse más adelante, probado con cuidado antes de subir. Por ahora,
-// abierto a cualquier origen siempre -- mismo comportamiento simple y
-// confiable que tenía la app antes de que existiera esta restricción.
+// ORIGIN_ALLOWLIST: dominios reales desde donde se puede llamar a esta API,
+// separados por coma en la variable de entorno ALLOWED_ORIGINS de Railway
+// (ej: "https://astromundo.aguscorderov.workers.dev"). Sin esa variable
+// cargada, cae a *: sigue funcionando, pero sin la restricción real.
+//
+// Nota del 20-ago-2026: esto se había desactivado por completo durante una
+// caída real de producción -- en su momento pareció ser la causa de un
+// "Failed to fetch" persistente, pero investigándolo con calma después, la
+// causa real fue otra (rutas de importación rotas en dos archivos, que
+// tumbaban el servidor entero). La lógica de acá abajo se probó de nuevo,
+// contra un servidor real, con pedidos OPTIONS (preflight) reales -- ver el
+// registro de pruebas de esa fecha.
+const ORIGIN_ALLOWLIST = (process.env.ALLOWED_ORIGINS || "")
+  .split(",").map(o => o.trim()).filter(Boolean);
+
 function aplicarHeadersDeSeguridad(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  if (ORIGIN_ALLOWLIST.length === 0) {
+    // Sin la variable configurada: abierto a cualquier origen, para no
+    // romper nada mientras no se cargue ALLOWED_ORIGINS en Railway.
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (origin && ORIGIN_ALLOWLIST.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  // Si hay lista cargada y el origen del pedido NO está en ella, no se pone
+  // el header — el navegador bloquea la respuesta del lado del que pidió.
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
@@ -137,6 +155,9 @@ const server = createServer(async (req, res) => {
         const body = await readJSONBody(req);
         sendJSON(res, 200, chartRoutes.saveInterpretation(user, parts[2], body.text)); return;
       }
+      if (parts.length === 4 && parts[3] === "positions" && req.method === "PUT") {
+        sendJSON(res, 200, chartRoutes.updateChartPositions(user, parts[2], await readJSONBody(req))); return;
+      }
     }
 
     // ---- /api/services ----
@@ -194,6 +215,9 @@ const server = createServer(async (req, res) => {
       if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.listSynastries(user)); return; }
       if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, synastryRoutes.createSynastry(user, await readJSONBody(req))); return; }
       if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, synastryRoutes.getSynastry(user, parts[2])); return; }
+      if (parts.length === 4 && parts[3] === "interpretation" && req.method === "PUT") {
+        sendJSON(res, 200, synastryRoutes.updateSynastryInterpretation(user, parts[2], await readJSONBody(req))); return;
+      }
       if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, synastryRoutes.deleteSynastry(user, parts[2])); return; }
     }
 
