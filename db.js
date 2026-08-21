@@ -262,6 +262,8 @@ const migrations = [
   "ALTER TABLE charts ADD COLUMN progressed_target_date TEXT",
   "ALTER TABLE charts ADD COLUMN progressed_moment TEXT",
   "ALTER TABLE appointments ADD COLUMN date TEXT",
+  "ALTER TABLE synastries ADD COLUMN asc_lon_a REAL",
+  "ALTER TABLE synastries ADD COLUMN asc_lon_b REAL",
   "ALTER TABLE users ADD COLUMN signup_source TEXT",
 ];
 for (const sql of migrations) {
