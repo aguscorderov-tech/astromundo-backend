@@ -60,6 +60,21 @@ export function saveInterpretation(user, chartId, text) {
   return getChart(user, chartId);
 }
 
+// Actualiza SOLO posiciones y aspectos de una carta ya guardada -- para
+// cartas viejas creadas antes de sumar un cuerpo menor nuevo (ej. Ceres,
+// Sedna), sin tener que recrear la carta entera de cero. El resto de la
+// carta (tipo, Ascendente, Medio Cielo, cúspides de casas) no cambia --
+// esos ya estaban bien calculados, no dependen de qué cuerpos menores
+// existan en el sistema hoy.
+export function updateChartPositions(user, chartId, body) {
+  const { positions, aspects } = body;
+  if (!positions) throw new HttpError(400, "Falta positions.");
+  const chart = getChart(user, chartId);
+  db.prepare("UPDATE charts SET positions_json = ?, aspects_json = ? WHERE id = ?")
+    .run(JSON.stringify(positions), JSON.stringify(aspects || []), chart.id);
+  return getChart(user, chartId);
+}
+
 export function deleteChart(user, chartId) {
   const result = db.prepare("DELETE FROM charts WHERE id = ? AND user_id = ?").run(chartId, user.id);
   if (result.changes === 0) throw new HttpError(404, "Carta no encontrada.");
