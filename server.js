@@ -188,7 +188,9 @@ const server = createServer(async (req, res) => {
       }
       if (parts.length === 3 && req.method === "POST") {
         const author = communityRoutes.requireAnyAuth(req);
-        const body = await readJSONBody(req);
+        // Límite más alto que el default (5MB) -- acá puede venir una
+        // foto o un video real en base64, no solo texto.
+        const body = await readJSONBody(req, 25_000_000);
         sendJSON(res, 201, await communityRoutes.createPost(author, body)); return;
       }
       if (parts.length === 4 && req.method === "GET") {
@@ -203,6 +205,15 @@ const server = createServer(async (req, res) => {
         const author = communityRoutes.requireAnyAuth(req);
         sendJSON(res, 200, await communityRoutes.toggleLike(author, parts[3])); return;
       }
+    }
+
+    // ---- /api/media/:id -- sirve el archivo real (foto o video) que se
+    // subió a la Comunidad. Respuesta binaria de verdad, no JSON. ----
+    if (parts[1] === "media" && parts.length === 3 && req.method === "GET") {
+      const { mimeType, buffer } = await communityRoutes.getMedia(parts[2]);
+      res.writeHead(200, { "Content-Type": mimeType, "Content-Length": buffer.length, "Cache-Control": "public, max-age=31536000, immutable" });
+      res.end(buffer);
+      return;
     }
 
     // ---- /api/clients ----
