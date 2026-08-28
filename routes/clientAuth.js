@@ -69,3 +69,30 @@ export async function confirmLink(account, body) {
   if (!vinculado) throw new HttpError(404, "No se encontró esa ficha para vincular (o ya estaba vinculada a otra cuenta).");
   return { linked: true };
 }
+
+// Todas las cartas de todas las fichas que el cliente ya confirmó como
+// suyas -- si todavía no vinculó ninguna, devuelve una lista vacía (el
+// frontend, en ese caso, calcula la carta al vuelo con sus propios datos
+// de nacimiento en vez de buscar una carta ya guardada).
+export async function getMyCharts(account) {
+  return db.prepare(
+    `SELECT charts.* FROM charts
+     JOIN clients ON clients.id = charts.client_id
+     WHERE clients.client_account_id = ?
+     ORDER BY charts.created_at DESC`
+  ).all(account.id);
+}
+
+// Guarda los datos de nacimiento propios del cliente -- solo para el
+// caso en que ningún astrólogo lo tenga cargado todavía. No calcula la
+// carta acá (eso lo hace el frontend, con el mismo motor real de
+// siempre) -- esta ruta solo persiste los datos para la próxima vez.
+export async function updateBirthData(account, body) {
+  const { date, time, timeUnknown, place, lat, lng, tz, tzName } = body;
+  if (!date || !place) throw new HttpError(400, "Faltan date o place.");
+  db.prepare(
+    `UPDATE client_accounts SET date = ?, time = ?, time_unknown = ?, place = ?, lat = ?, lng = ?, tz = ?, tz_name = ? WHERE id = ?`
+  ).run(date, time || null, timeUnknown ? 1 : 0, place, lat ?? null, lng ?? null, tz || null, tzName || null, account.id);
+  const actualizada = db.prepare("SELECT * FROM client_accounts WHERE id = ?").get(account.id);
+  return publicClientAccount(actualizada);
+}
