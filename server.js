@@ -188,9 +188,12 @@ const server = createServer(async (req, res) => {
       }
       if (parts.length === 3 && req.method === "POST") {
         const author = communityRoutes.requireAnyAuth(req);
-        // Límite más alto que el default (5MB) -- acá puede venir una
-        // foto o un video real en base64, no solo texto.
-        const body = await readJSONBody(req, 25_000_000);
+        // Límite más alto que el default (5MB) -- puede venir una foto o
+        // un video real en base64 (+33% de peso extra por la propia
+        // codificación base64), no solo texto. El límite del lado del
+        // cliente es 120MB, así que acá tiene que entrar cómodo eso
+        // más el 33% extra (≈160MB) más el resto del cuerpo del pedido.
+        const body = await readJSONBody(req, 170_000_000);
         sendJSON(res, 201, await communityRoutes.createPost(author, body)); return;
       }
       if (parts.length === 4 && req.method === "GET") {
@@ -201,9 +204,29 @@ const server = createServer(async (req, res) => {
         const body = await readJSONBody(req);
         sendJSON(res, 201, await communityRoutes.createComment(author, parts[3], body)); return;
       }
-      if (parts.length === 5 && parts[4] === "like" && req.method === "POST") {
+      if (parts.length === 5 && parts[4] === "react" && req.method === "POST") {
         const author = communityRoutes.requireAnyAuth(req);
-        sendJSON(res, 200, await communityRoutes.toggleLike(author, parts[3])); return;
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await communityRoutes.toggleReaction(author, parts[3], body.tipo)); return;
+      }
+      if (parts.length === 5 && parts[4] === "destacar" && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        sendJSON(res, 200, await communityRoutes.toggleDestacado(author, parts[3])); return;
+      }
+    }
+    if (parts[1] === "community" && parts[2] === "follow" && req.method === "POST") {
+      const author = communityRoutes.requireAnyAuth(req);
+      const body = await readJSONBody(req);
+      sendJSON(res, 200, await communityRoutes.toggleFollow(author, body.type, body.id)); return;
+    }
+    if (parts[1] === "community" && parts[2] === "profile") {
+      if (parts.length === 5 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.getProfile(req, parts[3], parts[4])); return;
+      }
+      if (parts.length === 3 && req.method === "PUT") {
+        const author = communityRoutes.requireAnyAuth(req);
+        const body = await readJSONBody(req, 12_000_000); // puede traer una foto de perfil en base64
+        sendJSON(res, 200, await communityRoutes.updateBioYFoto(author, body)); return;
       }
     }
 
