@@ -254,12 +254,52 @@ CREATE TABLE IF NOT EXISTS platform_subscriptions (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- La Comunidad -- author_type/author_id apuntan a "users" (astrólogo) o
+-- "client_accounts" (cliente final), según author_type. Se guarda
+-- author_name directo en vez de resolverlo con un JOIN condicional, que
+-- sería mucho más frágil con dos tablas de origen posibles.
+CREATE TABLE IF NOT EXISTS community_posts (
+  id TEXT PRIMARY KEY,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  space TEXT NOT NULL,
+  post_type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  media_url TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS community_comments (
+  id TEXT PRIMARY KEY,
+  post_id TEXT NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Clave primaria compuesta (no un id propio) -- así "dar me gusta" dos
+-- veces a la misma cosa es imposible por diseño, no por lógica aparte
+-- que haya que acordarse de chequear en cada ruta.
+CREATE TABLE IF NOT EXISTS community_likes (
+  post_id TEXT NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (post_id, author_type, author_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
 CREATE INDEX IF NOT EXISTS idx_appt_user ON appointments(user_id);
 CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_community_posts_space ON community_posts(space);
+CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
 CREATE INDEX IF NOT EXISTS idx_platform_subs_user ON platform_subscriptions(user_id);
