@@ -16,10 +16,10 @@ export function sendJSON(res, status, data) {
   res.end(body);
 }
 
-export function readJSONBody(req) {
+export function readJSONBody(req, maxBytes = 5_000_000) {
   return new Promise((resolve, reject) => {
     let raw = "";
-    req.on("data", (chunk) => { raw += chunk; if (raw.length > 5_000_000) req.destroy(); });
+    req.on("data", (chunk) => { raw += chunk; if (raw.length > maxBytes) req.destroy(); });
     req.on("end", () => {
       if (!raw) return resolve({});
       try { resolve(JSON.parse(raw)); } catch (e) { reject(new Error("JSON inválido en el body")); }
