@@ -101,6 +101,33 @@ CREATE TABLE IF NOT EXISTS clients (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Cuenta de CLIENTE FINAL -- separada a propósito de "users" (que son los
+-- astrólogos). Ver auth-cliente.js para el detalle completo del porqué.
+CREATE TABLE IF NOT EXISTS client_accounts (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  name TEXT NOT NULL,
+  date TEXT,
+  time TEXT,
+  time_unknown INTEGER NOT NULL DEFAULT 0,
+  place TEXT,
+  lat REAL,
+  lng REAL,
+  tz TEXT,
+  tz_name TEXT,
+  notification_pref TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS client_sessions (
+  token TEXT PRIMARY KEY,
+  client_account_id TEXT NOT NULL REFERENCES client_accounts(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS charts (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -264,6 +291,7 @@ const migrations = [
   "ALTER TABLE appointments ADD COLUMN date TEXT",
   "ALTER TABLE synastries ADD COLUMN asc_lon_a REAL",
   "ALTER TABLE synastries ADD COLUMN asc_lon_b REAL",
+  "ALTER TABLE clients ADD COLUMN client_account_id TEXT REFERENCES client_accounts(id)",
   "ALTER TABLE services ADD COLUMN category TEXT",
   "ALTER TABLE users ADD COLUMN signup_source TEXT",
 ];
