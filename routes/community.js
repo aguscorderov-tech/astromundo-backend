@@ -68,19 +68,38 @@ export async function getPost(req, id) {
 }
 
 export async function createPost(author, body) {
-  const { space, postType, title, text, mediaUrl } = body;
+  const { space, postType, title, text, mediaUrl, mediaBase64, mediaMimeType } = body;
   if (!ESPACIOS_VALIDOS.includes(space)) throw new HttpError(400, "Espacio inválido.");
   if (!TIPOS_VALIDOS.includes(postType)) throw new HttpError(400, "Tipo de posteo inválido.");
   if (!title || !title.trim()) throw new HttpError(400, "Falta el título.");
-  if ((postType === "video" || postType === "reel") && !mediaUrl) {
-    throw new HttpError(400, "Los posteos de video o reel necesitan un link (mediaUrl) por ahora.");
+
+  // El archivo (foto o video) se acepta en CUALQUIER tipo de posteo --
+  // una Pregunta puede venir con una foto de la carta, por ejemplo. Solo
+  // Video/Reel lo exigen como obligatorio.
+  let mediaUrlFinal = mediaUrl || null;
+  if (mediaBase64 && mediaMimeType) {
+    const mediaId = newId("media");
+    db.prepare("INSERT INTO media (id, mime_type, data_base64) VALUES (?, ?, ?)").run(mediaId, mediaMimeType, mediaBase64);
+    mediaUrlFinal = `/api/media/${mediaId}`;
   }
+  if ((postType === "video" || postType === "reel") && !mediaUrlFinal) {
+    throw new HttpError(400, "Los posteos de video o reel necesitan un archivo subido o un link.");
+  }
+
   const id = newId("post");
   db.prepare(
     `INSERT INTO community_posts (id, author_type, author_id, author_name, space, post_type, title, body, media_url)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, author.type, author.id, author.name, space, postType, title.trim(), text || null, mediaUrl || null);
+  ).run(id, author.type, author.id, author.name, space, postType, title.trim(), text || null, mediaUrlFinal);
   return db.prepare("SELECT * FROM community_posts WHERE id = ?").get(id);
+}
+
+/** Arma la respuesta binaria real (no JSON) para servir de vuelta un
+    archivo ya subido -- res.end() con los bytes reales, no con texto. */
+export async function getMedia(id) {
+  const m = db.prepare("SELECT * FROM media WHERE id = ?").get(id);
+  if (!m) throw new HttpError(404, "No se encontró ese archivo.");
+  return { mimeType: m.mime_type, buffer: Buffer.from(m.data_base64, "base64") };
 }
 
 export async function createComment(author, postId, body) {
