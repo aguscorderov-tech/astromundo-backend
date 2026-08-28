@@ -292,6 +292,21 @@ CREATE TABLE IF NOT EXISTS community_likes (
   PRIMARY KEY (post_id, author_type, author_id)
 );
 
+-- Archivo subido de verdad (foto o video) -- se guarda el contenido en
+-- base64 adentro de la misma base SQLite, no en el disco del servidor.
+-- Se decidió así a propósito: Railway no garantiza que el disco persista
+-- entre despliegues, y no hay todavía una cuenta de almacenamiento
+-- externo (tipo Cloudflare R2) configurada. Es la opción más simple que
+-- funciona de manera confiable con lo que ya existe hoy -- si la
+-- Comunidad crece mucho, esto es lo primero que convendría migrar a un
+-- almacenamiento dedicado, pero por ahora resuelve el problema real.
+CREATE TABLE IF NOT EXISTS media (
+  id TEXT PRIMARY KEY,
+  mime_type TEXT NOT NULL,
+  data_base64 TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
