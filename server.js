@@ -5,9 +5,11 @@
 
 import { createServer } from "node:http";
 import { authenticate } from "./auth.js";
+import { authenticateClient, publicClientAccount } from "./auth-cliente.js";
 import { sendJSON, readJSONBody, HttpError } from "./http-utils.js";
 
 import * as authRoutes from "./routes/auth.js";
+import * as clientAuthRoutes from "./routes/clientAuth.js";
 import * as clientRoutes from "./routes/clients.js";
 import * as chartRoutes from "./routes/charts.js";
 import * as serviceRoutes from "./routes/services.js";
@@ -50,7 +52,7 @@ function aplicarHeadersDeSeguridad(req, res) {
   }
   // Si hay lista cargada y el origen del pedido NO está en ella, no se pone
   // el header — el navegador bloquea la respuesta del lado del que pidió.
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Client-Auth");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
   // Headers de seguridad — esta API solo devuelve JSON (nunca HTML), así
@@ -65,6 +67,15 @@ function requireAuth(req) {
   const user = authenticate(req);
   if (!user) throw new HttpError(401, "No autenticado — mandá el header Authorization: Bearer <token>.");
   return user;
+}
+
+// Mismo patrón que requireAuth(), pero para la cuenta de cliente final --
+// mira el header X-Client-Auth en vez de Authorization (ver el porqué
+// en auth-cliente.js).
+function requireClientAuth(req) {
+  const account = authenticateClient(req);
+  if (!account) throw new HttpError(401, "No autenticado — mandá el header X-Client-Auth: Bearer <token>.");
+  return account;
 }
 
 const server = createServer(async (req, res) => {
@@ -133,6 +144,37 @@ const server = createServer(async (req, res) => {
         const user = requireAuth(req);
         const body = await readJSONBody(req);
         sendJSON(res, 200, await authRoutes.disableTotpRoute(user, body)); return;
+      }
+    }
+
+    // ---- /api/client-auth/* -- cuenta de cliente final, aparte de
+    // /api/auth (que es para el astrólogo). Ver auth-cliente.js. ----
+    if (parts[1] === "client-auth") {
+      if (parts[2] === "register" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await clientAuthRoutes.registerClient(body)); return;
+      }
+      if (parts[2] === "login" && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.loginClient(body)); return;
+      }
+      if (parts[2] === "me" && req.method === "GET") {
+        const account = requireClientAuth(req);
+        sendJSON(res, 200, publicClientAccount(account)); return;
+      }
+      if (parts[2] === "confirm-link" && req.method === "POST") {
+        const account = requireClientAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.confirmLink(account, body)); return;
+      }
+      if (parts[2] === "my-charts" && req.method === "GET") {
+        const account = requireClientAuth(req);
+        sendJSON(res, 200, await clientAuthRoutes.getMyCharts(account)); return;
+      }
+      if (parts[2] === "birth-data" && req.method === "PUT") {
+        const account = requireClientAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await clientAuthRoutes.updateBirthData(account, body)); return;
       }
     }
 
