@@ -10,6 +10,7 @@ import { sendJSON, readJSONBody, HttpError } from "./http-utils.js";
 
 import * as authRoutes from "./routes/auth.js";
 import * as clientAuthRoutes from "./routes/clientAuth.js";
+import * as communityRoutes from "./routes/community.js";
 import * as clientRoutes from "./routes/clients.js";
 import * as chartRoutes from "./routes/charts.js";
 import * as serviceRoutes from "./routes/services.js";
@@ -175,6 +176,32 @@ const server = createServer(async (req, res) => {
         const account = requireClientAuth(req);
         const body = await readJSONBody(req);
         sendJSON(res, 200, await clientAuthRoutes.updateBirthData(account, body)); return;
+      }
+    }
+
+    // ---- /api/community/* -- acá publican tanto astrólogos como
+    // clientes finales, por eso usa requireAnyAuth() en vez de
+    // requireAuth()/requireClientAuth() por separado. ----
+    if (parts[1] === "community" && parts[2] === "posts") {
+      if (parts.length === 3 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listPosts(req, url.searchParams)); return;
+      }
+      if (parts.length === 3 && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await communityRoutes.createPost(author, body)); return;
+      }
+      if (parts.length === 4 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.getPost(req, parts[3])); return;
+      }
+      if (parts.length === 5 && parts[4] === "comments" && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await communityRoutes.createComment(author, parts[3], body)); return;
+      }
+      if (parts.length === 5 && parts[4] === "like" && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        sendJSON(res, 200, await communityRoutes.toggleLike(author, parts[3])); return;
       }
     }
 
