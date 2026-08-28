@@ -21,6 +21,12 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, "astromundo.db");
 const dbDir = path.dirname(DB_PATH);
 try { fs.mkdirSync(dbDir, { recursive: true }); } catch (e) { /* ya existe, o no hace falta (ej. carpeta actual) */ }
 
+// Los archivos que suba la Comunidad (fotos, videos) viven en el mismo
+// volumen persistente que la base de datos -- no necesita una variable
+// de entorno propia, se deriva del mismo DB_PATH.
+export const MEDIA_DIR = path.join(dbDir, "media");
+try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (e) { /* ídem */ }
+
 export const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
 db.exec("PRAGMA foreign_keys = ON;");
@@ -292,19 +298,27 @@ CREATE TABLE IF NOT EXISTS community_likes (
   PRIMARY KEY (post_id, author_type, author_id)
 );
 
--- Archivo subido de verdad (foto o video) -- se guarda el contenido en
--- base64 adentro de la misma base SQLite, no en el disco del servidor.
--- Se decidió así a propósito: Railway no garantiza que el disco persista
--- entre despliegues, y no hay todavía una cuenta de almacenamiento
--- externo (tipo Cloudflare R2) configurada. Es la opción más simple que
--- funciona de manera confiable con lo que ya existe hoy -- si la
--- Comunidad crece mucho, esto es lo primero que convendría migrar a un
--- almacenamiento dedicado, pero por ahora resuelve el problema real.
+-- Archivo subido de verdad (foto o video) -- el CONTENIDO vive como
+-- archivo real en el volumen persistente (MEDIA_DIR, ver más arriba),
+-- confirmado que /data en Railway sí persiste entre despliegues). Acá
+-- solo se guarda la metadata -- mucho más liviano que guardar el
+-- archivo entero en base64 adentro de la fila, como se hacía antes.
 CREATE TABLE IF NOT EXISTS media (
   id TEXT PRIMARY KEY,
   mime_type TEXT NOT NULL,
-  data_base64 TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Seguir a alguien -- clave primaria compuesta por las cuatro columnas,
+-- así "seguir dos veces" es imposible por diseño, sin necesitar lógica
+-- aparte para chequearlo. author_type/id de siempre (astrologo|cliente).
+CREATE TABLE IF NOT EXISTS community_follows (
+  follower_type TEXT NOT NULL,
+  follower_id TEXT NOT NULL,
+  followed_type TEXT NOT NULL,
+  followed_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (follower_type, follower_id, followed_type, followed_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
@@ -312,6 +326,7 @@ CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
 CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
 CREATE INDEX IF NOT EXISTS idx_appt_user ON appointments(user_id);
 CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
+CREATE INDEX IF NOT EXISTS idx_follows_followed ON community_follows(followed_type, followed_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_community_posts_space ON community_posts(space);
 CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(post_id);
@@ -349,6 +364,12 @@ const migrations = [
   "ALTER TABLE clients ADD COLUMN client_account_id TEXT REFERENCES client_accounts(id)",
   "ALTER TABLE services ADD COLUMN category TEXT",
   "ALTER TABLE users ADD COLUMN signup_source TEXT",
+  "ALTER TABLE media DROP COLUMN data_base64",
+  "ALTER TABLE community_likes ADD COLUMN reaction_type TEXT NOT NULL DEFAULT 'corazon'",
+  "ALTER TABLE client_accounts ADD COLUMN bio TEXT",
+  "ALTER TABLE client_accounts ADD COLUMN photo_url TEXT",
+  "ALTER TABLE community_posts ADD COLUMN is_destacado INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE community_posts ADD COLUMN media_type TEXT",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
