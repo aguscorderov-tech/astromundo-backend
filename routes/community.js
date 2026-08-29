@@ -244,3 +244,4 @@ export async function updateBioYFoto(author, body) {
 }
 
 export { requireAnyAuth };
+
