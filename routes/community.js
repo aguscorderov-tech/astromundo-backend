@@ -274,4 +274,56 @@ export async function editPost(author, postId, body) {
   return db.prepare("SELECT * FROM community_posts WHERE id = ?").get(postId);
 }
 
+/** Sube una historia -- a diferencia de un posteo, el archivo es
+    obligatorio siempre (no tiene sentido una historia sin nada). */
+export async function createStory(author, body) {
+  const { mediaBase64, mediaMimeType } = body;
+  if (!mediaBase64 || !mediaMimeType) throw new HttpError(400, "Falta el archivo de la historia.");
+  const mediaId = newId("media");
+  fs.writeFileSync(path.join(MEDIA_DIR, mediaId), Buffer.from(mediaBase64, "base64"));
+  db.prepare("INSERT INTO media (id, mime_type) VALUES (?, ?)").run(mediaId, mediaMimeType);
+  const mediaUrl = `/api/media/${mediaId}`;
+  const mediaType = mediaMimeType.startsWith("video/") ? "video" : "image";
+  const id = newId("story");
+  db.prepare(
+    `INSERT INTO community_stories (id, author_type, author_id, author_name, media_url, media_type) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(id, author.type, author.id, author.name, mediaUrl, mediaType);
+  return db.prepare("SELECT * FROM community_stories WHERE id = ?").get(id);
+}
+
+/** Todas las historias activas (últimas 24hs), agrupadas por persona --
+    cada grupo trae sus historias en orden, más si esa persona sos vos
+    mismo (para poder borrar las propias desde el visor). */
+export async function listStories(req) {
+  const filas = db.prepare(
+    `SELECT * FROM community_stories WHERE created_at > datetime('now', '-24 hours') ORDER BY created_at ASC`
+  ).all();
+  const autor = authenticateAny(req);
+  const grupos = {};
+  const orden = [];
+  filas.forEach(s => {
+    const clave = `${s.author_type}:${s.author_id}`;
+    if (!grupos[clave]) {
+      grupos[clave] = { authorType: s.author_type, authorId: s.author_id, authorName: s.author_name, esMio: !!(autor && autor.type === s.author_type && autor.id === s.author_id), historias: [] };
+      orden.push(clave);
+    }
+    grupos[clave].historias.push({ id: s.id, mediaUrl: s.media_url, mediaType: s.media_type, createdAt: s.created_at });
+  });
+  return orden.map(k => grupos[k]);
+}
+
+/** Borra una historia PROPIA antes de que expire sola. */
+export async function deleteStory(author, storyId) {
+  const historia = db.prepare("SELECT * FROM community_stories WHERE id = ?").get(storyId);
+  if (!historia) throw new HttpError(404, "No se encontró esa historia.");
+  if (historia.author_type !== author.type || historia.author_id !== author.id) throw new HttpError(403, "Solo podés borrar tus propias historias.");
+  if (historia.media_url.startsWith("/api/media/")) {
+    const mediaId = historia.media_url.replace("/api/media/", "");
+    try { fs.unlinkSync(path.join(MEDIA_DIR, mediaId)); } catch (e) { /* si ya no está, no pasa nada */ }
+    db.prepare("DELETE FROM media WHERE id = ?").run(mediaId);
+  }
+  db.prepare("DELETE FROM community_stories WHERE id = ?").run(storyId);
+  return { deleted: true };
+}
+
 export { requireAnyAuth };
