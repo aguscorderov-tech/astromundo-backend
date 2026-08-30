@@ -199,6 +199,15 @@ const server = createServer(async (req, res) => {
       if (parts.length === 4 && req.method === "GET") {
         sendJSON(res, 200, await communityRoutes.getPost(req, parts[3])); return;
       }
+      if (parts.length === 4 && req.method === "PUT") {
+        const author = communityRoutes.requireAnyAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 200, await communityRoutes.editPost(author, parts[3], body)); return;
+      }
+      if (parts.length === 4 && req.method === "DELETE") {
+        const author = communityRoutes.requireAnyAuth(req);
+        sendJSON(res, 200, await communityRoutes.deletePost(author, parts[3])); return;
+      }
       if (parts.length === 5 && parts[4] === "comments" && req.method === "POST") {
         const author = communityRoutes.requireAnyAuth(req);
         const body = await readJSONBody(req);
@@ -390,4 +399,3 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Astromundo backend escuchando en http://localhost:${PORT}`);
 });
-
