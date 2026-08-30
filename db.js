@@ -309,6 +309,20 @@ CREATE TABLE IF NOT EXISTS media (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Historias -- a diferencia de los posteos, no tienen título ni texto,
+-- solo una foto o video, y desaparecen solas después de 24hs (filtrado
+-- por fecha al leerlas, no hace falta un borrado programado aparte).
+CREATE TABLE IF NOT EXISTS community_stories (
+  id TEXT PRIMARY KEY,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  media_url TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stories_created ON community_stories(created_at);
+
 -- Seguir a alguien -- clave primaria compuesta por las cuatro columnas,
 -- así "seguir dos veces" es imposible por diseño, sin necesitar lógica
 -- aparte para chequearlo. author_type/id de siempre (astrologo|cliente).
@@ -378,4 +392,3 @@ for (const sql of migrations) {
 export function newId(prefix) {
   return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
-
