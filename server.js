@@ -273,7 +273,32 @@ const server = createServer(async (req, res) => {
     // subió a la Comunidad. Respuesta binaria de verdad, no JSON. ----
     if (parts[1] === "media" && parts.length === 3 && req.method === "GET") {
       const { mimeType, buffer } = await communityRoutes.getMedia(parts[2]);
-      res.writeHead(200, { "Content-Type": mimeType, "Content-Length": buffer.length, "Cache-Control": "public, max-age=31536000, immutable" });
+      const total = buffer.length;
+      const rango = req.headers.range;
+      // Sin soporte de rangos, un video tiene que bajar ENTERO antes de
+      // poder empezar a reproducirse -- con esto, el navegador puede
+      // pedir de a partes, y el video arranca casi al instante aunque
+      // pese varios MB, en vez de esperar la descarga completa.
+      if (rango) {
+        const match = /bytes=(\d*)-(\d*)/.exec(rango);
+        const inicio = match && match[1] ? parseInt(match[1], 10) : 0;
+        const fin = match && match[2] ? parseInt(match[2], 10) : total - 1;
+        const finReal = Math.min(fin, total - 1);
+        if (inicio >= total || inicio > finReal) {
+          res.writeHead(416, { "Content-Range": `bytes */${total}` });
+          res.end();
+          return;
+        }
+        const trozo = buffer.subarray(inicio, finReal + 1);
+        res.writeHead(206, {
+          "Content-Type": mimeType, "Content-Length": trozo.length,
+          "Content-Range": `bytes ${inicio}-${finReal}/${total}`,
+          "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=31536000, immutable",
+        });
+        res.end(trozo);
+        return;
+      }
+      res.writeHead(200, { "Content-Type": mimeType, "Content-Length": total, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=31536000, immutable" });
       res.end(buffer);
       return;
     }
