@@ -187,7 +187,7 @@ const server = createServer(async (req, res) => {
         sendJSON(res, 200, await communityRoutes.listPosts(req, url.searchParams)); return;
       }
       if (parts.length === 3 && req.method === "POST") {
-        const author = communityRoutes.requireAnyAuth(req);
+        const author = communityRoutes.requireCommunityAccess(req);
         // Límite más alto que el default (5MB) -- puede venir una foto o
         // un video real en base64 (+33% de peso extra por la propia
         // codificación base64), no solo texto. El límite del lado del
@@ -209,12 +209,12 @@ const server = createServer(async (req, res) => {
         sendJSON(res, 200, await communityRoutes.deletePost(author, parts[3])); return;
       }
       if (parts.length === 5 && parts[4] === "comments" && req.method === "POST") {
-        const author = communityRoutes.requireAnyAuth(req);
+        const author = communityRoutes.requireCommunityAccess(req);
         const body = await readJSONBody(req);
         sendJSON(res, 201, await communityRoutes.createComment(author, parts[3], body)); return;
       }
       if (parts.length === 5 && parts[4] === "react" && req.method === "POST") {
-        const author = communityRoutes.requireAnyAuth(req);
+        const author = communityRoutes.requireCommunityAccess(req);
         const body = await readJSONBody(req);
         sendJSON(res, 200, await communityRoutes.toggleReaction(author, parts[3], body.tipo)); return;
       }
@@ -228,7 +228,7 @@ const server = createServer(async (req, res) => {
         sendJSON(res, 200, await communityRoutes.listStories(req)); return;
       }
       if (parts.length === 3 && req.method === "POST") {
-        const author = communityRoutes.requireAnyAuth(req);
+        const author = communityRoutes.requireCommunityAccess(req);
         const body = await readJSONBody(req, 170_000_000);
         sendJSON(res, 201, await communityRoutes.createStory(author, body)); return;
       }
@@ -238,7 +238,7 @@ const server = createServer(async (req, res) => {
       }
     }
     if (parts[1] === "community" && parts[2] === "follow" && req.method === "POST") {
-      const author = communityRoutes.requireAnyAuth(req);
+      const author = communityRoutes.requireCommunityAccess(req);
       const body = await readJSONBody(req);
       sendJSON(res, 200, await communityRoutes.toggleFollow(author, body.type, body.id)); return;
     }
@@ -250,6 +250,22 @@ const server = createServer(async (req, res) => {
         const author = communityRoutes.requireAnyAuth(req);
         const body = await readJSONBody(req, 12_000_000); // puede traer una foto de perfil en base64
         sendJSON(res, 200, await communityRoutes.updateBioYFoto(author, body)); return;
+      }
+    }
+
+    // ---- /api/community/membership -- la cuota mensual, solo para
+    // cuentas de cliente final (el astrólogo entra gratis, ver
+    // hasActiveCommunityAccess en community.js). ----
+    if (parts[1] === "community" && parts[2] === "membership") {
+      const author = communityRoutes.requireAnyAuth(req);
+      if (parts.length === 3 && req.method === "GET") {
+        sendJSON(res, 200, communityRoutes.getMyCommunityStatus(author)); return;
+      }
+      if (parts.length === 4 && parts[3] === "checkout" && req.method === "POST") {
+        if (author.type !== "cliente") throw new HttpError(400, "Los astrólogos ya tienen acceso incluido en su plan.");
+        const account = requireClientAuth(req);
+        const baseUrl = `${url.protocol}//${req.headers.host}`;
+        sendJSON(res, 200, await communityRoutes.createCommunityCheckout(account, baseUrl)); return;
       }
     }
 
@@ -392,6 +408,11 @@ const server = createServer(async (req, res) => {
       if (parts[2] === "webhooks" && parts[3] === "platform-subscription" && req.method === "POST") {
         const body = await readJSONBody(req).catch(() => ({}));
         await subscriptionRoutes.handleSubscriptionWebhook(url.searchParams, req.headers, body);
+        sendJSON(res, 200, { received: true }); return;
+      }
+      if (parts[2] === "webhooks" && parts[3] === "community-subscription" && req.method === "POST") {
+        const body = await readJSONBody(req).catch(() => ({}));
+        await communityRoutes.handleCommunityWebhook(url.searchParams, req.headers, body);
         sendJSON(res, 200, { received: true }); return;
       }
       if (parts[2] === "webhooks" && parts[3] === "paypal" && parts[4] === "capture" && req.method === "GET") {
