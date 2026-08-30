@@ -13,7 +13,7 @@ import * as mp from "../providers/mercadopago.js";
 // mismo criterio que el resto de la plataforma (price_cents / 100 = pesos).
 export const PLAN_PRICES = { pro: 3000000, premium: 6800000 };
 
-function ownerCredentials() {
+export function ownerCredentials() {
   const accessToken = process.env.OWNER_MP_ACCESS_TOKEN;
   const webhookSecret = process.env.OWNER_MP_WEBHOOK_SECRET;
   if (!accessToken) throw new HttpError(400, "El dueño de la plataforma todavía no conectó el cobro de suscripciones — avisale para que cargue sus credenciales de Mercado Pago.");
