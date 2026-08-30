@@ -10,6 +10,8 @@ import { authenticateClient } from "../auth-cliente.js";
 import { HttpError } from "../http-utils.js";
 import fs from "node:fs";
 import path from "node:path";
+import * as mp from "../providers/mercadopago.js";
+import { ownerCredentials } from "./subscriptions.js";
 
 const ESPACIOS_VALIDOS = ["anuncios", "transitos", "preguntas", "cartas"];
 const TIPOS_VALIDOS = ["video", "reel", "post", "pregunta"];
@@ -324,6 +326,71 @@ export async function deleteStory(author, storyId) {
   }
   db.prepare("DELETE FROM community_stories WHERE id = ?").run(storyId);
   return { deleted: true };
+}
+
+// --- Cuota mensual de la Comunidad -- solo cuentas de cliente final,
+// los astrólogos ya pagan su propio plan y entran gratis. Mismo
+// proveedor (Mercado Pago, débito automático) que las suscripciones
+// Pro/Premium, cobrando a nombre del dueño de la plataforma.
+export const COMMUNITY_PRICE_CENTS = 770000; // $7.700 ARS/mes -- equivalente a USD 5 al dólar oficial (~$1.535, agosto 2026), incluye "los mejores días"
+
+export function hasActiveCommunityAccess(author) {
+  if (author.type === "astrologo") return true;
+  const sub = db.prepare("SELECT status FROM community_subscriptions WHERE client_account_id = ? ORDER BY created_at DESC LIMIT 1").get(author.id);
+  return !!(sub && sub.status === "active");
+}
+
+/** Mismo que requireAnyAuth(), pero además exige que la cuenta de
+    cliente tenga la cuota activa -- se usa en las acciones que
+    "participan" (publicar, comentar, reaccionar, seguir, historias),
+    nunca para simplemente leer el feed. */
+export function requireCommunityAccess(req) {
+  const author = requireAnyAuth(req);
+  if (!hasActiveCommunityAccess(author)) throw new HttpError(402, "Necesitás ser miembro de la Comunidad para hacer esto.");
+  return author;
+}
+
+export function getMyCommunityStatus(author) {
+  return { activa: hasActiveCommunityAccess(author), precioCents: COMMUNITY_PRICE_CENTS };
+}
+
+export async function createCommunityCheckout(clientAccount, baseUrl) {
+  if (hasActiveCommunityAccess({ type: "cliente", id: clientAccount.id })) throw new HttpError(400, "Ya sos miembro de la Comunidad.");
+  const { accessToken } = ownerCredentials();
+  const id = newId("csub");
+  db.prepare(`INSERT INTO community_subscriptions (id, client_account_id, amount_cents, status) VALUES (?, ?, ?, 'pending')`)
+    .run(id, clientAccount.id, COMMUNITY_PRICE_CENTS);
+  const pre = await mp.createPreapproval(accessToken, {
+    reason: "Comunidad Apolo — membresía mensual",
+    amountCents: COMMUNITY_PRICE_CENTS, currency: "ARS", frequency: 1, frequencyType: "months",
+    payerEmail: clientAccount.email, externalReference: id,
+    notificationUrl: `${baseUrl}/api/public/webhooks/community-subscription?subscriptionId=${id}`,
+    backUrl: `${baseUrl}/comunidad.html?membresia=gracias`,
+  });
+  db.prepare("UPDATE community_subscriptions SET provider_ref = ? WHERE id = ?").run(pre.id, id);
+  return { redirectUrl: pre.init_point };
+}
+
+export async function handleCommunityWebhook(query, headers, body) {
+  const subId = query.get("subscriptionId");
+  const sub = subId && db.prepare("SELECT * FROM community_subscriptions WHERE id = ?").get(subId);
+  if (!sub) return;
+  const { accessToken, webhookSecret } = ownerCredentials();
+
+  const preapprovalId = query.get("data.id") || (body && body.data && body.data.id) || sub.provider_ref;
+  if (webhookSecret) {
+    const valid = mp.verifyWebhookSignature({ xSignature: headers["x-signature"], xRequestId: headers["x-request-id"], dataId: preapprovalId, webhookSecret });
+    if (!valid) { console.warn("Webhook de suscripción de Comunidad con firma inválida, se ignora."); return; }
+  }
+
+  const preapproval = await mp.getPreapproval(accessToken, sub.provider_ref);
+  if (preapproval.status === "authorized") {
+    db.prepare("UPDATE community_subscriptions SET status='active', updated_at=datetime('now') WHERE id=?").run(sub.id);
+    return;
+  }
+  if (preapproval.status === "paused" || preapproval.status === "cancelled") {
+    db.prepare("UPDATE community_subscriptions SET status=?, updated_at=datetime('now') WHERE id=?").run(preapproval.status, sub.id);
+  }
 }
 
 export { requireAnyAuth };
