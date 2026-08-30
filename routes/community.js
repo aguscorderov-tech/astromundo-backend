@@ -23,8 +23,17 @@ export function authenticateAny(req) {
   const user = authenticate(req);
   if (user) return { type: "astrologo", id: user.id, name: user.professionalName || user.name };
   const account = authenticateClient(req);
-  if (account) return { type: "cliente", id: account.id, name: account.name };
+  if (account) return { type: "cliente", id: account.id, name: account.name, email: account.email };
   return null;
+}
+
+/** El dueño de la plataforma (mismo ADMIN_EMAIL que ya usa el lado de
+    astrólogo en auth.js) entra gratis a la Comunidad aunque se loguee
+    con una cuenta de cliente, para poder probar la app como la vería
+    un cliente real, sin tener que pagarse la cuota a sí mismo. */
+function esCuentaDelDueno(email) {
+  const ownerEmail = (process.env.ADMIN_EMAIL || "").toLowerCase().trim();
+  return !!(ownerEmail && email && email.toLowerCase().trim() === ownerEmail);
 }
 
 function requireAnyAuth(req) {
@@ -336,6 +345,7 @@ export const COMMUNITY_PRICE_CENTS = 770000; // $7.700 ARS/mes -- equivalente a 
 
 export function hasActiveCommunityAccess(author) {
   if (author.type === "astrologo") return true;
+  if (author.type === "cliente" && esCuentaDelDueno(author.email)) return true;
   const sub = db.prepare("SELECT status FROM community_subscriptions WHERE client_account_id = ? ORDER BY created_at DESC LIMIT 1").get(author.id);
   return !!(sub && sub.status === "active");
 }
@@ -355,7 +365,7 @@ export function getMyCommunityStatus(author) {
 }
 
 export async function createCommunityCheckout(clientAccount, baseUrl) {
-  if (hasActiveCommunityAccess({ type: "cliente", id: clientAccount.id })) throw new HttpError(400, "Ya sos miembro de la Comunidad.");
+  if (hasActiveCommunityAccess({ type: "cliente", id: clientAccount.id, email: clientAccount.email })) throw new HttpError(400, "Ya sos miembro de la Comunidad.");
   const { accessToken } = ownerCredentials();
   const id = newId("csub");
   db.prepare(`INSERT INTO community_subscriptions (id, client_account_id, amount_cents, status) VALUES (?, ?, ?, 'pending')`)
