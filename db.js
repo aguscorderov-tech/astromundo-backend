@@ -260,6 +260,21 @@ CREATE TABLE IF NOT EXISTS platform_subscriptions (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Cuota mensual de la Comunidad -- solo para cuentas de CLIENTE final
+-- (los astrólogos ya pagan su propio plan de Apolo, entran gratis).
+-- Mismo patrón que platform_subscriptions, pero apuntando a
+-- client_accounts en vez de users.
+CREATE TABLE IF NOT EXISTS community_subscriptions (
+  id TEXT PRIMARY KEY,
+  client_account_id TEXT NOT NULL REFERENCES client_accounts(id) ON DELETE CASCADE,
+  amount_cents INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  provider_ref TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_community_subs_client ON community_subscriptions(client_account_id);
+
 -- La Comunidad -- author_type/author_id apuntan a "users" (astrólogo) o
 -- "client_accounts" (cliente final), según author_type. Se guarda
 -- author_name directo en vez de resolverlo con un JOIN condicional, que
