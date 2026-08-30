@@ -223,6 +223,20 @@ const server = createServer(async (req, res) => {
         sendJSON(res, 200, await communityRoutes.toggleDestacado(author, parts[3])); return;
       }
     }
+    if (parts[1] === "community" && parts[2] === "stories") {
+      if (parts.length === 3 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listStories(req)); return;
+      }
+      if (parts.length === 3 && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        const body = await readJSONBody(req, 170_000_000);
+        sendJSON(res, 201, await communityRoutes.createStory(author, body)); return;
+      }
+      if (parts.length === 4 && req.method === "DELETE") {
+        const author = communityRoutes.requireAnyAuth(req);
+        sendJSON(res, 200, await communityRoutes.deleteStory(author, parts[3])); return;
+      }
+    }
     if (parts[1] === "community" && parts[2] === "follow" && req.method === "POST") {
       const author = communityRoutes.requireAnyAuth(req);
       const body = await readJSONBody(req);
