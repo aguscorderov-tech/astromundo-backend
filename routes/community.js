@@ -243,5 +243,35 @@ export async function updateBioYFoto(author, body) {
   return obtenerPersona(author.type, author.id);
 }
 
-export { requireAnyAuth };
+/** Borra un posteo PROPIO -- comentarios y reacciones se van solos por
+    el ON DELETE CASCADE de la base. El archivo subido (si tenía) se
+    borra del disco a mano, porque eso la base no lo hace sola. */
+export async function deletePost(author, postId) {
+  const post = db.prepare("SELECT * FROM community_posts WHERE id = ?").get(postId);
+  if (!post) throw new HttpError(404, "No se encontró ese posteo.");
+  if (post.author_type !== author.type || post.author_id !== author.id) throw new HttpError(403, "Solo podés borrar tus propios posteos.");
+  if (post.media_url && post.media_url.startsWith("/api/media/")) {
+    const mediaId = post.media_url.replace("/api/media/", "");
+    const rutaArchivo = path.join(MEDIA_DIR, mediaId);
+    try { fs.unlinkSync(rutaArchivo); } catch (e) { /* si ya no está, no pasa nada */ }
+    db.prepare("DELETE FROM media WHERE id = ?").run(mediaId);
+  }
+  db.prepare("DELETE FROM community_posts WHERE id = ?").run(postId);
+  return { deleted: true };
+}
 
+/** Edita el título y/o el texto de un posteo PROPIO -- el archivo
+    adjunto (si tiene) no se puede cambiar por acá, para mantenerlo
+    simple; si hace falta cambiar el archivo, se borra el posteo y se
+    crea uno nuevo. */
+export async function editPost(author, postId, body) {
+  const post = db.prepare("SELECT * FROM community_posts WHERE id = ?").get(postId);
+  if (!post) throw new HttpError(404, "No se encontró ese posteo.");
+  if (post.author_type !== author.type || post.author_id !== author.id) throw new HttpError(403, "Solo podés editar tus propios posteos.");
+  const { title, text } = body;
+  if (!title || !title.trim()) throw new HttpError(400, "Falta el título.");
+  db.prepare("UPDATE community_posts SET title = ?, body = ? WHERE id = ?").run(title.trim(), text || null, postId);
+  return db.prepare("SELECT * FROM community_posts WHERE id = ?").get(postId);
+}
+
+export { requireAnyAuth };
