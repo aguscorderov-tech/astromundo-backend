@@ -12,7 +12,7 @@ import {
 import { HttpError } from "../http-utils.js";
 
 export async function registerClient(body) {
-  const { email, password, name, date, time, timeUnknown, place, lat, lng, tz, tzName } = body;
+  const { email, password, name, date, time, timeUnknown, place, lat, lng, tz, tzName, codigoReferido } = body;
   if (!email || !password || !name) throw new HttpError(400, "Faltan email, password o name.");
   if (password.length < 8) throw new HttpError(400, "La contraseña necesita al menos 8 caracteres.");
 
@@ -20,15 +20,26 @@ export async function registerClient(body) {
   const existente = db.prepare("SELECT id FROM client_accounts WHERE email = ?").get(emailNormalizado);
   if (existente) throw new HttpError(409, "Ya existe una cuenta con ese email.");
 
+  // Si vino con un código de referido válido, se guarda quién lo trajo
+  // -- el bonus real (30 días gratis para quien refirió) se otorga
+  // recién cuando esta cuenta pague su PRIMERA cuota de Comunidad, no
+  // acá (ver otorgarBonusPorReferido en community.js). Un código que
+  // no existe simplemente se ignora, sin romper el registro por eso.
+  let referidoPorId = null;
+  if (codigoReferido && codigoReferido.trim()) {
+    const referente = db.prepare("SELECT id FROM client_accounts WHERE codigo_referido = ?").get(codigoReferido.trim().toUpperCase());
+    if (referente) referidoPorId = referente.id;
+  }
+
   const { hash, salt } = hashPassword(password);
   const id = newId("ca");
   db.prepare(
-    `INSERT INTO client_accounts (id, email, password_hash, password_salt, name, date, time, time_unknown, place, lat, lng, tz, tz_name)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    `INSERT INTO client_accounts (id, email, password_hash, password_salt, name, date, time, time_unknown, place, lat, lng, tz, tz_name, referido_por)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).run(
     id, emailNormalizado, hash, salt, name,
     date || null, time || null, timeUnknown ? 1 : 0, place || null,
-    lat ?? null, lng ?? null, tz || null, tzName || null
+    lat ?? null, lng ?? null, tz || null, tzName || null, referidoPorId
   );
 
   // No se vincula nada todavía -- solo se buscan posibles coincidencias
