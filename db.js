@@ -338,6 +338,86 @@ CREATE TABLE IF NOT EXISTS community_stories (
 );
 CREATE INDEX IF NOT EXISTS idx_stories_created ON community_stories(created_at);
 
+
+-- para la persona que las recibe (no para quien las genera). post_id
+-- puede ser null (una notificación de "te siguió" no tiene posteo).
+CREATE TABLE IF NOT EXISTS community_notifications (
+  id TEXT PRIMARY KEY,
+  recipient_type TEXT NOT NULL,
+  recipient_id TEXT NOT NULL,
+  tipo TEXT NOT NULL, -- 'follow' | 'comment' | 'reaction'
+  actor_type TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  actor_name TEXT NOT NULL,
+  post_id TEXT,
+  leida INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notif_recipient ON community_notifications(recipient_type, recipient_id, created_at);
+
+-- Reportes -- solo se guardan para revisión manual, no disparan ninguna
+-- acción automática (nada se borra ni se oculta solo por un reporte).
+CREATE TABLE IF NOT EXISTS community_reports (
+  id TEXT PRIMARY KEY,
+  reporter_type TEXT NOT NULL,
+  reporter_id TEXT NOT NULL,
+  target_type TEXT NOT NULL, -- 'post' | 'comment' | 'usuario'
+  target_id TEXT NOT NULL,
+  motivo TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Bloquear -- misma idea que seguir (clave compuesta), pero en sentido
+-- contrario: oculta el contenido de esa persona de tu propio feed, y
+-- le impide interactuar con el tuyo.
+CREATE TABLE IF NOT EXISTS community_blocks (
+  blocker_type TEXT NOT NULL,
+  blocker_id TEXT NOT NULL,
+  blocked_type TEXT NOT NULL,
+  blocked_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (blocker_type, blocker_id, blocked_type, blocked_id)
+);
+
+-- Guardados -- clave compuesta, mismo criterio que seguir/bloquear:
+-- "guardar dos veces" es imposible por diseño.
+CREATE TABLE IF NOT EXISTS community_saves (
+  post_id TEXT NOT NULL REFERENCES community_posts(id) ON DELETE CASCADE,
+  author_type TEXT NOT NULL,
+  author_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (post_id, author_type, author_id)
+);
+
+-- Mensajes directos -- una fila por mensaje individual, no por
+-- conversación (la conversación se arma agrupando de a pares al leer).
+CREATE TABLE IF NOT EXISTS community_messages (
+  id TEXT PRIMARY KEY,
+  sender_type TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  recipient_type TEXT NOT NULL,
+  recipient_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  leido INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_msg_par ON community_messages(sender_type, sender_id, recipient_type, recipient_id, created_at);
+
+-- Espacios en vivo -- un astrólogo agenda un Q&A a una hora fija; se
+-- notifica a quien lo sigue (ver crearNotificacion en el momento de
+-- agendar). No incluye videollamada en sí, solo el aviso y el horario.
+CREATE TABLE IF NOT EXISTS community_live_events (
+  id TEXT PRIMARY KEY,
+  astrologo_id TEXT NOT NULL,
+  astrologo_name TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  descripcion TEXT,
+  fecha_hora TEXT NOT NULL,
+  espacio TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_live_fecha ON community_live_events(fecha_hora);
+
 -- Seguir a alguien -- clave primaria compuesta por las cuatro columnas,
 -- así "seguir dos veces" es imposible por diseño, sin necesitar lógica
 -- aparte para chequearlo. author_type/id de siempre (astrologo|cliente).
@@ -399,6 +479,10 @@ const migrations = [
   "ALTER TABLE client_accounts ADD COLUMN photo_url TEXT",
   "ALTER TABLE community_posts ADD COLUMN is_destacado INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE community_posts ADD COLUMN media_type TEXT",
+  "ALTER TABLE community_posts ADD COLUMN resuelta INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE client_accounts ADD COLUMN codigo_referido TEXT",
+  "ALTER TABLE client_accounts ADD COLUMN referido_por TEXT",
+  "ALTER TABLE client_accounts ADD COLUMN bonus_acceso_hasta TEXT",
 ];
 for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* la columna ya existe — nada que hacer */ }
