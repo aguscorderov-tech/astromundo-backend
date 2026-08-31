@@ -61,17 +61,111 @@ function miReaccion(autor, postId) {
 export async function listPosts(req, query) {
   const espacio = query.get("espacio");
   if (espacio && !ESPACIOS_VALIDOS.includes(espacio)) throw new HttpError(400, "Espacio inválido.");
-  const posts = espacio
-    ? db.prepare("SELECT * FROM community_posts WHERE space = ? ORDER BY created_at DESC LIMIT 50").all(espacio)
-    : db.prepare("SELECT * FROM community_posts ORDER BY created_at DESC LIMIT 50").all();
-
-  // Si hay una sesión (de cualquiera de los dos tipos), marcamos qué
-  // reacción -- si hay alguna -- ya puso esta persona en cada posteo.
+  const feed = query.get("feed"); // 'siguiendo' | null (todo, por defecto)
+  const ordenar = query.get("ordenar"); // 'tendencia' | null (recientes, por defecto)
   const autor = authenticateAny(req);
+
+  let sql = "SELECT * FROM community_posts WHERE 1=1";
+  const params = [];
+  if (espacio) { sql += " AND space = ?"; params.push(espacio); }
+  if (feed === "siguiendo") {
+    if (!autor) throw new HttpError(401, "Iniciá sesión para ver tu feed de Siguiendo.");
+    sql += ` AND EXISTS (SELECT 1 FROM community_follows f WHERE f.follower_type = ? AND f.follower_id = ? AND f.followed_type = community_posts.author_type AND f.followed_id = community_posts.author_id)`;
+    params.push(autor.type, autor.id);
+  }
+
+  let posts;
+  if (ordenar === "tendencia") {
+    // Traemos más candidatos (200, no 50) para elegir el top real de la
+    // semana entre un universo más amplio, no solo los últimos 50
+    // publicados -- si no, "tendencia" y "recientes" darían casi lo mismo.
+    posts = db.prepare(sql + " ORDER BY created_at DESC LIMIT 200").all(...params);
+    posts = posts.map(p => ({
+      ...p,
+      __puntaje: db.prepare(`SELECT COUNT(*) AS n FROM community_likes WHERE post_id = ? AND created_at > datetime('now', '-7 days')`).get(p.id).n,
+    })).sort((a, b) => b.__puntaje - a.__puntaje).slice(0, 50);
+  } else {
+    posts = db.prepare(sql + " ORDER BY created_at DESC LIMIT 50").all(...params);
+  }
+
+  const visibles = autor ? posts.filter(p => !estanBloqueados(autor.type, autor.id, p.author_type, p.author_id)) : posts;
+  return visibles.map(p => {
+    const { __puntaje, ...limpio } = p;
+    const { reacciones, comentarios } = contarPost(limpio.id);
+    const guardado = autor ? !!db.prepare("SELECT 1 FROM community_saves WHERE post_id = ? AND author_type = ? AND author_id = ?").get(limpio.id, autor.type, autor.id) : false;
+    return { ...limpio, reacciones, comentarios, miReaccion: miReaccion(autor, limpio.id), guardado };
+  });
+}
+
+/** Guardar/sacar un posteo de tus guardados -- toggle, misma idea que
+    una reacción, pero privado (nadie más ve qué guardaste). */
+export async function toggleSave(author, postId) {
+  const post = db.prepare("SELECT id FROM community_posts WHERE id = ?").get(postId);
+  if (!post) throw new HttpError(404, "No se encontró ese posteo.");
+  const yaExiste = db.prepare("SELECT 1 FROM community_saves WHERE post_id = ? AND author_type = ? AND author_id = ?").get(postId, author.type, author.id);
+  if (yaExiste) {
+    db.prepare("DELETE FROM community_saves WHERE post_id = ? AND author_type = ? AND author_id = ?").run(postId, author.type, author.id);
+  } else {
+    db.prepare("INSERT INTO community_saves (post_id, author_type, author_id) VALUES (?, ?, ?)").run(postId, author.type, author.id);
+  }
+  return { guardado: !yaExiste };
+}
+
+export async function listSavedPosts(author) {
+  const posts = db.prepare(
+    `SELECT p.* FROM community_posts p
+     JOIN community_saves s ON s.post_id = p.id
+     WHERE s.author_type = ? AND s.author_id = ?
+     ORDER BY s.created_at DESC`
+  ).all(author.type, author.id);
   return posts.map(p => {
+    const { reacciones, comentarios } = contarPost(p.id);
+    return { ...p, reacciones, comentarios, miReaccion: miReaccion(author, p.id), guardado: true };
+  });
+}
+
+/** Marcar/desmarcar una Pregunta como resuelta -- solo un astrólogo
+    puede hacerlo (es una validación profesional, no del autor de la
+    pregunta), y solo tiene sentido en posteos tipo "pregunta". */
+export async function toggleResuelta(author, postId) {
+  if (author.type !== "astrologo") throw new HttpError(403, "Solo un astrólogo puede marcar una pregunta como resuelta.");
+  const post = db.prepare("SELECT * FROM community_posts WHERE id = ?").get(postId);
+  if (!post) throw new HttpError(404, "No se encontró ese posteo.");
+  if (post.post_type !== "pregunta") throw new HttpError(400, "Solo las Preguntas se pueden marcar como resueltas.");
+  const nuevoValor = post.resuelta ? 0 : 1;
+  db.prepare("UPDATE community_posts SET resuelta = ? WHERE id = ?").run(nuevoValor, postId);
+  return { resuelta: !!nuevoValor };
+}
+
+/** Busca posteos (por título/texto) y personas (por nombre) a la vez --
+    LIKE simple, sin nada de full-text -- alcanza para el volumen que
+    tiene la Comunidad hoy. */
+export async function buscarComunidad(req, texto) {
+  const q = (texto || "").trim();
+  if (q.length < 2) throw new HttpError(400, "Escribí al menos 2 caracteres para buscar.");
+  const comodin = `%${q}%`;
+  const autor = authenticateAny(req);
+
+  const posteos = db.prepare(
+    `SELECT * FROM community_posts WHERE title LIKE ? OR body LIKE ? ORDER BY created_at DESC LIMIT 20`
+  ).all(comodin, comodin);
+  const visibles = autor ? posteos.filter(p => !estanBloqueados(autor.type, autor.id, p.author_type, p.author_id)) : posteos;
+  const posteosConDatos = visibles.map(p => {
     const { reacciones, comentarios } = contarPost(p.id);
     return { ...p, reacciones, comentarios, miReaccion: miReaccion(autor, p.id) };
   });
+
+  const astrologos = db.prepare(
+    `SELECT id, name, professional_name, photo_url FROM users WHERE name LIKE ? OR professional_name LIKE ? LIMIT 10`
+  ).all(comodin, comodin).map(u => ({ type: "astrologo", id: u.id, name: u.professional_name || u.name, photoUrl: u.photo_url }));
+  const clientes = db.prepare(
+    `SELECT id, name, photo_url FROM client_accounts WHERE name LIKE ? LIMIT 10`
+  ).all(comodin).map(c => ({ type: "cliente", id: c.id, name: c.name, photoUrl: c.photo_url }));
+  const personas = autor
+    ? [...astrologos, ...clientes].filter(p => !estanBloqueados(autor.type, autor.id, p.type, p.id))
+    : [...astrologos, ...clientes];
+
+  return { posteos: posteosConDatos, personas };
 }
 
 export async function getPost(req, id) {
@@ -135,15 +229,27 @@ export async function getMedia(id) {
   return { mimeType: m.mime_type, buffer: fs.readFileSync(rutaArchivo) };
 }
 
+/** Inserta una notificación, salvo que la acción sea sobre uno mismo
+    (comentar tu propio posteo, por ejemplo) -- nadie necesita que le
+    avisen de algo que hizo él mismo. */
+function crearNotificacion(recipientType, recipientId, tipo, actor, postId) {
+  if (recipientType === actor.type && recipientId === actor.id) return;
+  db.prepare(
+    `INSERT INTO community_notifications (id, recipient_type, recipient_id, tipo, actor_type, actor_id, actor_name, post_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(newId("notif"), recipientType, recipientId, tipo, actor.type, actor.id, actor.name, postId || null);
+}
+
 export async function createComment(author, postId, body) {
-  const post = db.prepare("SELECT id FROM community_posts WHERE id = ?").get(postId);
+  const post = db.prepare("SELECT id, author_type, author_id FROM community_posts WHERE id = ?").get(postId);
   if (!post) throw new HttpError(404, "No se encontró ese posteo.");
+  if (estanBloqueados(author.type, author.id, post.author_type, post.author_id)) throw new HttpError(403, "No podés interactuar con este posteo.");
   const { text } = body;
   if (!text || !text.trim()) throw new HttpError(400, "Falta el comentario.");
   const id = newId("cm");
   db.prepare(
     `INSERT INTO community_comments (id, post_id, author_type, author_id, author_name, body) VALUES (?, ?, ?, ?, ?, ?)`
   ).run(id, postId, author.type, author.id, author.name, text.trim());
+  crearNotificacion(post.author_type, post.author_id, "comment", author, postId);
   return db.prepare("SELECT * FROM community_comments WHERE id = ?").get(id);
 }
 
@@ -153,8 +259,9 @@ export async function createComment(author, postId, body) {
     posteo a la vez, igual que en Facebook. */
 export async function toggleReaction(author, postId, tipo) {
   if (!TIPOS_REACCION.includes(tipo)) throw new HttpError(400, "Tipo de reacción inválido.");
-  const post = db.prepare("SELECT id FROM community_posts WHERE id = ?").get(postId);
+  const post = db.prepare("SELECT id, author_type, author_id FROM community_posts WHERE id = ?").get(postId);
   if (!post) throw new HttpError(404, "No se encontró ese posteo.");
+  if (estanBloqueados(author.type, author.id, post.author_type, post.author_id)) throw new HttpError(403, "No podés interactuar con este posteo.");
   const actual = miReaccion(author, postId);
   if (actual === tipo) {
     db.prepare("DELETE FROM community_likes WHERE post_id = ? AND author_type = ? AND author_id = ?").run(postId, author.type, author.id);
@@ -162,6 +269,7 @@ export async function toggleReaction(author, postId, tipo) {
     db.prepare("UPDATE community_likes SET reaction_type = ? WHERE post_id = ? AND author_type = ? AND author_id = ?").run(tipo, postId, author.type, author.id);
   } else {
     db.prepare("INSERT INTO community_likes (post_id, author_type, author_id, reaction_type) VALUES (?, ?, ?, ?)").run(postId, author.type, author.id, tipo);
+    crearNotificacion(post.author_type, post.author_id, "reaction", author, postId);
   }
   const { reacciones } = contarPost(postId);
   return { reacciones, miReaccion: actual === tipo ? null : tipo };
@@ -171,11 +279,13 @@ export async function toggleReaction(author, postId, tipo) {
     puede seguir a uno mismo. */
 export async function toggleFollow(follower, followedType, followedId) {
   if (follower.type === followedType && follower.id === followedId) throw new HttpError(400, "No podés seguirte a vos mismo.");
+  if (estanBloqueados(follower.type, follower.id, followedType, followedId)) throw new HttpError(403, "No podés seguir a esta persona.");
   const yaExiste = db.prepare("SELECT 1 FROM community_follows WHERE follower_type = ? AND follower_id = ? AND followed_type = ? AND followed_id = ?").get(follower.type, follower.id, followedType, followedId);
   if (yaExiste) {
     db.prepare("DELETE FROM community_follows WHERE follower_type = ? AND follower_id = ? AND followed_type = ? AND followed_id = ?").run(follower.type, follower.id, followedType, followedId);
   } else {
     db.prepare("INSERT INTO community_follows (follower_type, follower_id, followed_type, followed_id) VALUES (?, ?, ?, ?)").run(follower.type, follower.id, followedType, followedId);
+    crearNotificacion(followedType, followedId, "follow", follower, null);
   }
   const seguidores = db.prepare("SELECT COUNT(*) AS n FROM community_follows WHERE followed_type = ? AND followed_id = ?").get(followedType, followedId).n;
   return { siguiendo: !yaExiste, seguidores };
@@ -347,7 +457,14 @@ export function hasActiveCommunityAccess(author) {
   if (author.type === "astrologo") return true;
   if (author.type === "cliente" && esCuentaDelDueno(author.email)) return true;
   const sub = db.prepare("SELECT status FROM community_subscriptions WHERE client_account_id = ? ORDER BY created_at DESC LIMIT 1").get(author.id);
-  return !!(sub && sub.status === "active");
+  if (sub && sub.status === "active") return true;
+  // Bonus por referidos -- crédito propio, independiente de si la
+  // suscripción real de Mercado Pago está activa o no.
+  if (author.type === "cliente") {
+    const cuenta = db.prepare("SELECT bonus_acceso_hasta FROM client_accounts WHERE id = ?").get(author.id);
+    if (cuenta && cuenta.bonus_acceso_hasta && new Date(cuenta.bonus_acceso_hasta + "Z") > new Date()) return true;
+  }
+  return false;
 }
 
 /** Mismo que requireAnyAuth(), pero además exige que la cuenta de
@@ -395,12 +512,187 @@ export async function handleCommunityWebhook(query, headers, body) {
 
   const preapproval = await mp.getPreapproval(accessToken, sub.provider_ref);
   if (preapproval.status === "authorized") {
+    // El bonus por referido se otorga solo la PRIMERA vez que esta
+    // suscripción pasa a activa -- si ya estaba activa antes (un
+    // webhook repetido, por ejemplo), no hay que volver a regalar 30
+    // días cada vez que Mercado Pago reconfirma el cobro mensual.
+    const yaEstabaActiva = sub.status === "active";
     db.prepare("UPDATE community_subscriptions SET status='active', updated_at=datetime('now') WHERE id=?").run(sub.id);
+    if (!yaEstabaActiva) otorgarBonusPorReferido(sub.client_account_id);
     return;
   }
   if (preapproval.status === "paused" || preapproval.status === "cancelled") {
     db.prepare("UPDATE community_subscriptions SET status=?, updated_at=datetime('now') WHERE id=?").run(preapproval.status, sub.id);
   }
+}
+
+// --- Notificaciones ---
+export async function listNotifications(author) {
+  const filas = db.prepare(
+    `SELECT * FROM community_notifications WHERE recipient_type = ? AND recipient_id = ? ORDER BY created_at DESC LIMIT 50`
+  ).all(author.type, author.id);
+  const sinLeer = db.prepare(
+    `SELECT COUNT(*) AS n FROM community_notifications WHERE recipient_type = ? AND recipient_id = ? AND leida = 0`
+  ).get(author.type, author.id).n;
+  return { notificaciones: filas, sinLeer };
+}
+
+export async function marcarNotificacionesLeidas(author) {
+  db.prepare(`UPDATE community_notifications SET leida = 1 WHERE recipient_type = ? AND recipient_id = ?`).run(author.type, author.id);
+  return { ok: true };
+}
+
+// --- Reportes y bloqueos ---
+export async function crearReporte(author, body) {
+  const { targetType, targetId, motivo } = body;
+  if (!["post", "comment", "usuario"].includes(targetType)) throw new HttpError(400, "Tipo de reporte inválido.");
+  if (!targetId) throw new HttpError(400, "Falta indicar qué se reporta.");
+  db.prepare(
+    `INSERT INTO community_reports (id, reporter_type, reporter_id, target_type, target_id, motivo) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(newId("report"), author.type, author.id, targetType, targetId, (motivo || "").trim().slice(0, 500) || null);
+  return { ok: true };
+}
+
+/** Bloqueo en las dos direcciones -- si CUALQUIERA de los dos bloqueó al
+    otro, no se ven mutuamente. Un modelo mental simple: "bloqueado" es
+    bloqueado, sin importar quién apretó el botón primero. */
+export function estanBloqueados(tipoA, idA, tipoB, idB) {
+  const fila = db.prepare(
+    `SELECT 1 FROM community_blocks WHERE
+     (blocker_type = ? AND blocker_id = ? AND blocked_type = ? AND blocked_id = ?) OR
+     (blocker_type = ? AND blocker_id = ? AND blocked_type = ? AND blocked_id = ?)`
+  ).get(tipoA, idA, tipoB, idB, tipoB, idB, tipoA, idA);
+  return !!fila;
+}
+
+export async function toggleBlock(author, blockedType, blockedId) {
+  if (author.type === blockedType && author.id === blockedId) throw new HttpError(400, "No podés bloquearte a vos mismo.");
+  const yaExiste = db.prepare(
+    "SELECT 1 FROM community_blocks WHERE blocker_type = ? AND blocker_id = ? AND blocked_type = ? AND blocked_id = ?"
+  ).get(author.type, author.id, blockedType, blockedId);
+  if (yaExiste) {
+    db.prepare("DELETE FROM community_blocks WHERE blocker_type = ? AND blocker_id = ? AND blocked_type = ? AND blocked_id = ?")
+      .run(author.type, author.id, blockedType, blockedId);
+  } else {
+    db.prepare("INSERT INTO community_blocks (blocker_type, blocker_id, blocked_type, blocked_id) VALUES (?, ?, ?, ?)")
+      .run(author.type, author.id, blockedType, blockedId);
+    // Bloquear también corta cualquier seguimiento cruzado entre los dos,
+    // en las dos direcciones -- no tendría sentido seguir bloqueado a alguien.
+    db.prepare(`DELETE FROM community_follows WHERE
+      (follower_type=? AND follower_id=? AND followed_type=? AND followed_id=?) OR
+      (follower_type=? AND follower_id=? AND followed_type=? AND followed_id=?)`)
+      .run(author.type, author.id, blockedType, blockedId, blockedType, blockedId, author.type, author.id);
+  }
+  return { bloqueado: !yaExiste };
+}
+
+// --- Mensajes directos ---
+export async function sendMessage(sender, recipientType, recipientId, body) {
+  if (sender.type === recipientType && sender.id === recipientId) throw new HttpError(400, "No podés enviarte un mensaje a vos mismo.");
+  if (!body || !body.trim()) throw new HttpError(400, "El mensaje no puede estar vacío.");
+  if (estanBloqueados(sender.type, sender.id, recipientType, recipientId)) throw new HttpError(403, "No podés enviar mensajes a esta persona.");
+  const id = newId("msg");
+  db.prepare(`INSERT INTO community_messages (id, sender_type, sender_id, recipient_type, recipient_id, body) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(id, sender.type, sender.id, recipientType, recipientId, body.trim().slice(0, 2000));
+  return db.prepare("SELECT * FROM community_messages WHERE id = ?").get(id);
+}
+
+/** Todos los mensajes con UNA persona puntual, en orden -- y de paso
+    marca como leídos los que esa persona me mandó a mí. */
+export async function getConversation(author, otherType, otherId) {
+  const mensajes = db.prepare(
+    `SELECT * FROM community_messages WHERE
+     (sender_type=? AND sender_id=? AND recipient_type=? AND recipient_id=?) OR
+     (sender_type=? AND sender_id=? AND recipient_type=? AND recipient_id=?)
+     ORDER BY created_at ASC LIMIT 200`
+  ).all(author.type, author.id, otherType, otherId, otherType, otherId, author.type, author.id);
+  db.prepare(`UPDATE community_messages SET leido=1 WHERE sender_type=? AND sender_id=? AND recipient_type=? AND recipient_id=? AND leido=0`)
+    .run(otherType, otherId, author.type, author.id);
+  return mensajes;
+}
+
+/** Lista de conversaciones -- agrupa todos mis mensajes por la OTRA
+    persona, quedándose con el más reciente de cada una y contando los
+    no leídos de cada conversación por separado. */
+export async function listConversations(author) {
+  const todos = db.prepare(
+    `SELECT * FROM community_messages WHERE (sender_type=? AND sender_id=?) OR (recipient_type=? AND recipient_id=?) ORDER BY created_at DESC`
+  ).all(author.type, author.id, author.type, author.id);
+  const mapa = new Map();
+  todos.forEach(m => {
+    const soyYoElRemitente = m.sender_type === author.type && m.sender_id === author.id;
+    const otroType = soyYoElRemitente ? m.recipient_type : m.sender_type;
+    const otroId = soyYoElRemitente ? m.recipient_id : m.sender_id;
+    const clave = `${otroType}:${otroId}`;
+    if (!mapa.has(clave)) mapa.set(clave, { otroType, otroId, ultimoMensaje: m.body, fecha: m.created_at, sinLeer: 0 });
+    if (!soyYoElRemitente && !m.leido) mapa.get(clave).sinLeer++;
+  });
+  return [...mapa.values()].map(c => {
+    const persona = obtenerPersona(c.otroType, c.otroId);
+    return { ...c, otroName: persona ? persona.name : "Usuario" };
+  });
+}
+
+// --- Espacios en vivo ---
+export async function crearEventoEnVivo(author, body) {
+  if (author.type !== "astrologo") throw new HttpError(403, "Solo un astrólogo puede agendar un espacio en vivo.");
+  const { titulo, descripcion, fechaHora, espacio } = body;
+  if (!titulo || !titulo.trim()) throw new HttpError(400, "Falta el título.");
+  if (!fechaHora) throw new HttpError(400, "Falta la fecha y hora.");
+  if (espacio && !ESPACIOS_VALIDOS.includes(espacio)) throw new HttpError(400, "Espacio inválido.");
+  const id = newId("live");
+  db.prepare(`INSERT INTO community_live_events (id, astrologo_id, astrologo_name, titulo, descripcion, fecha_hora, espacio) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, author.id, author.name, titulo.trim(), (descripcion || "").trim() || null, fechaHora, espacio || null);
+
+  // Avisar a quien sigue a este astrólogo -- reusa el sistema de
+  // notificaciones existente, con un tipo nuevo ("live"). post_id acá
+  // guarda el id del EVENTO, no de un posteo -- el frontend lo sabe
+  // interpretar por el tipo.
+  const seguidores = db.prepare("SELECT follower_type, follower_id FROM community_follows WHERE followed_type = 'astrologo' AND followed_id = ?").all(author.id);
+  seguidores.forEach(s => crearNotificacion(s.follower_type, s.follower_id, "live", author, id));
+
+  return db.prepare("SELECT * FROM community_live_events WHERE id = ?").get(id);
+}
+
+export async function listLiveEvents() {
+  return db.prepare("SELECT * FROM community_live_events WHERE fecha_hora > datetime('now') ORDER BY fecha_hora ASC LIMIT 20").all();
+}
+
+// --- Referidos ---
+function generarCodigoReferido() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+/** Devuelve (generándolo la primera vez que se pide) el código propio
+    de la persona, más cuántas personas ya trajo. Solo cuentas de
+    cliente participan del programa -- un astrólogo ya tiene su propio
+    plan, no paga la cuota de Comunidad. */
+export function getMyReferralInfo(author) {
+  if (author.type !== "cliente") throw new HttpError(400, "El programa de referidos es solo para cuentas de cliente.");
+  const cuenta = db.prepare("SELECT codigo_referido FROM client_accounts WHERE id = ?").get(author.id);
+  let codigo = cuenta.codigo_referido;
+  if (!codigo) {
+    codigo = generarCodigoReferido();
+    db.prepare("UPDATE client_accounts SET codigo_referido = ? WHERE id = ?").run(codigo, author.id);
+  }
+  const cantidadReferidos = db.prepare("SELECT COUNT(*) AS n FROM client_accounts WHERE referido_por = ?").get(author.id).n;
+  return { codigo, cantidadReferidos };
+}
+
+/** Se llama al activar por primera vez la cuota de Comunidad de
+    alguien que fue referido -- le suma 30 días de acceso gratis a
+    quien lo refirió. No toca la facturación real de Mercado Pago para
+    nada: es un crédito propio, guardado acá, más simple y más seguro
+    que intentar manipular el ciclo de cobro de otra persona. */
+export function otorgarBonusPorReferido(clientAccountId) {
+  const cuenta = db.prepare("SELECT referido_por FROM client_accounts WHERE id = ?").get(clientAccountId);
+  if (!cuenta || !cuenta.referido_por) return;
+  const referente = db.prepare("SELECT id, bonus_acceso_hasta FROM client_accounts WHERE id = ?").get(cuenta.referido_por);
+  if (!referente) return;
+  const base = referente.bonus_acceso_hasta && new Date(referente.bonus_acceso_hasta + "Z") > new Date() ? new Date(referente.bonus_acceso_hasta + "Z") : new Date();
+  base.setUTCDate(base.getUTCDate() + 30);
+  const nuevaFecha = base.toISOString().slice(0, 19).replace("T", " ");
+  db.prepare("UPDATE client_accounts SET bonus_acceso_hasta = ? WHERE id = ?").run(nuevaFecha, referente.id);
 }
 
 export { requireAnyAuth };
