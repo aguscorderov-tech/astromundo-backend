@@ -887,4 +887,41 @@ export async function sugerirAstrologos(author) {
     .map(u => ({ id: u.id, name: u.professional_name || u.name, photoUrl: u.photo_url, bio: u.bio, seguidores: u.seguidores }));
 }
 
+/** Datos de nacimiento (más la carta ya calculada, si existe una
+    vinculada por algún astrólogo) de una cuenta de cliente -- se usa
+    para armar la compatibilidad social entre dos personas. Prioriza
+    una carta YA CALCULADA (con casas reales) por sobre solo los datos
+    crudos, mismo criterio que ya usa /client-auth/my-charts. */
+function datosDeNacimiento(clientAccountId) {
+  const cuenta = db.prepare("SELECT * FROM client_accounts WHERE id = ?").get(clientAccountId);
+  if (!cuenta) return null;
+  const carta = db.prepare(
+    `SELECT charts.positions_json FROM charts JOIN clients ON clients.id = charts.client_id
+     WHERE clients.client_account_id = ? ORDER BY charts.created_at DESC LIMIT 1`
+  ).get(clientAccountId);
+  return {
+    name: cuenta.name,
+    positions: carta ? JSON.parse(carta.positions_json) : null,
+    date: cuenta.date, time: cuenta.time, timeUnknown: !!cuenta.time_unknown,
+    place: cuenta.place, lat: cuenta.lat, lng: cuenta.lng, tz: cuenta.tz, tzName: cuenta.tz_name,
+  };
+}
+
+/** Compatibilidad social entre DOS personas de la Comunidad -- devuelve
+    los datos de nacimiento de ambas (no el cálculo en sí, eso lo hace
+    el navegador con el mismo motor astronómico real de siempre). Parte
+    de la cuota de Comunidad, igual que "los mejores días". */
+export async function getDatosCompatibilidad(req, otroId) {
+  const author = requireCommunityAccess(req);
+  if (author.type !== "cliente") throw new HttpError(400, "La compatibilidad es entre cuentas de cliente.");
+  if (author.id === otroId) throw new HttpError(400, "Elegí a otra persona para comparar.");
+
+  const yo = datosDeNacimiento(author.id);
+  const otro = datosDeNacimiento(otroId);
+  if (!yo || (!yo.positions && !yo.date)) throw new HttpError(400, "Necesitás cargar tu fecha de nacimiento primero, desde tu carta.");
+  if (!otro) throw new HttpError(404, "No se encontró esa persona.");
+  if (!otro.positions && !otro.date) throw new HttpError(400, "Esa persona todavía no cargó su fecha de nacimiento.");
+  return { yo, otro: { ...otro, name: otro.name } };
+}
+
 export { requireAnyAuth };
