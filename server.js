@@ -222,6 +222,10 @@ const server = createServer(async (req, res) => {
         const author = communityRoutes.requireAnyAuth(req);
         sendJSON(res, 200, await communityRoutes.toggleDestacado(author, parts[3])); return;
       }
+      if (parts.length === 5 && parts[4] === "fijar" && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        sendJSON(res, 200, await communityRoutes.toggleFijado(author, parts[3])); return;
+      }
       if (parts.length === 5 && parts[4] === "save" && req.method === "POST") {
         const author = communityRoutes.requireCommunityAccess(req);
         sendJSON(res, 200, await communityRoutes.toggleSave(author, parts[3])); return;
@@ -237,6 +241,10 @@ const server = createServer(async (req, res) => {
     }
     if (parts[1] === "community" && parts[2] === "search" && req.method === "GET") {
       sendJSON(res, 200, await communityRoutes.buscarComunidad(req, url.searchParams.get("q"))); return;
+    }
+    if (parts[1] === "community" && parts[2] === "sugerencias" && req.method === "GET") {
+      const author = communityRoutes.authenticateAny(req);
+      sendJSON(res, 200, await communityRoutes.sugerirAstrologos(author)); return;
     }
 
     // ---- /api/community/messages -- mensajes directos ----
@@ -270,6 +278,32 @@ const server = createServer(async (req, res) => {
     if (parts[1] === "community" && parts[2] === "referidos" && req.method === "GET") {
       const author = communityRoutes.requireAnyAuth(req);
       sendJSON(res, 200, communityRoutes.getMyReferralInfo(author)); return;
+    }
+
+    // ---- /api/community/admin/* -- panel de moderación, solo dueño ----
+    if (parts[1] === "community" && parts[2] === "admin") {
+      if (parts[3] === "reports" && parts.length === 4 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listReports(req)); return;
+      }
+      if (parts[3] === "reports" && parts.length === 6 && parts[5] === "resolver" && req.method === "POST") {
+        sendJSON(res, 200, await communityRoutes.resolverReporte(req, parts[4])); return;
+      }
+      if (parts[3] === "suspender" && parts.length === 6 && req.method === "POST") {
+        sendJSON(res, 200, await communityRoutes.toggleSuspension(req, parts[4], parts[5])); return;
+      }
+    }
+
+    // ---- /api/community/admin/* -- moderación, solo el dueño (isAdmin) ----
+    if (parts[1] === "community" && parts[2] === "admin") {
+      if (parts[3] === "reports" && parts.length === 4 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listReports(req)); return;
+      }
+      if (parts[3] === "reports" && parts.length === 6 && parts[5] === "resolver" && req.method === "POST") {
+        sendJSON(res, 200, await communityRoutes.resolverReporte(req, parts[4])); return;
+      }
+      if (parts[3] === "suspender" && parts.length === 6 && req.method === "POST") {
+        sendJSON(res, 200, await communityRoutes.toggleSuspension(req, parts[4], parts[5])); return;
+      }
     }
     if (parts[1] === "community" && parts[2] === "stories") {
       if (parts.length === 3 && req.method === "GET") {
