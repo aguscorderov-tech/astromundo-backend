@@ -280,6 +280,11 @@ const server = createServer(async (req, res) => {
       sendJSON(res, 200, communityRoutes.getMyReferralInfo(author)); return;
     }
 
+    // ---- /api/community/compatibilidad/:otroId ----
+    if (parts[1] === "community" && parts[2] === "compatibilidad" && parts.length === 4 && req.method === "GET") {
+      sendJSON(res, 200, await communityRoutes.getDatosCompatibilidad(req, parts[3])); return;
+    }
+
     // ---- /api/community/admin/* -- panel de moderación, solo dueño ----
     if (parts[1] === "community" && parts[2] === "admin") {
       if (parts[3] === "reports" && parts.length === 4 && req.method === "GET") {
