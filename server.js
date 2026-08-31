@@ -222,6 +222,54 @@ const server = createServer(async (req, res) => {
         const author = communityRoutes.requireAnyAuth(req);
         sendJSON(res, 200, await communityRoutes.toggleDestacado(author, parts[3])); return;
       }
+      if (parts.length === 5 && parts[4] === "save" && req.method === "POST") {
+        const author = communityRoutes.requireCommunityAccess(req);
+        sendJSON(res, 200, await communityRoutes.toggleSave(author, parts[3])); return;
+      }
+      if (parts.length === 5 && parts[4] === "resolver" && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        sendJSON(res, 200, await communityRoutes.toggleResuelta(author, parts[3])); return;
+      }
+    }
+    if (parts[1] === "community" && parts[2] === "saved" && req.method === "GET") {
+      const author = communityRoutes.requireAnyAuth(req);
+      sendJSON(res, 200, await communityRoutes.listSavedPosts(author)); return;
+    }
+    if (parts[1] === "community" && parts[2] === "search" && req.method === "GET") {
+      sendJSON(res, 200, await communityRoutes.buscarComunidad(req, url.searchParams.get("q"))); return;
+    }
+
+    // ---- /api/community/messages -- mensajes directos ----
+    if (parts[1] === "community" && parts[2] === "messages") {
+      const author = communityRoutes.requireCommunityAccess(req);
+      if (parts.length === 3 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listConversations(author)); return;
+      }
+      if (parts.length === 3 && req.method === "POST") {
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await communityRoutes.sendMessage(author, body.type, body.id, body.body)); return;
+      }
+      if (parts.length === 5 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.getConversation(author, parts[3], parts[4])); return;
+      }
+    }
+
+    // ---- /api/community/live -- espacios en vivo ----
+    if (parts[1] === "community" && parts[2] === "live") {
+      if (parts.length === 3 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listLiveEvents()); return;
+      }
+      if (parts.length === 3 && req.method === "POST") {
+        const author = communityRoutes.requireAnyAuth(req);
+        const body = await readJSONBody(req);
+        sendJSON(res, 201, await communityRoutes.crearEventoEnVivo(author, body)); return;
+      }
+    }
+
+    // ---- /api/community/referidos ----
+    if (parts[1] === "community" && parts[2] === "referidos" && req.method === "GET") {
+      const author = communityRoutes.requireAnyAuth(req);
+      sendJSON(res, 200, communityRoutes.getMyReferralInfo(author)); return;
     }
     if (parts[1] === "community" && parts[2] === "stories") {
       if (parts.length === 3 && req.method === "GET") {
@@ -267,6 +315,29 @@ const server = createServer(async (req, res) => {
         const baseUrl = `${url.protocol}//${req.headers.host}`;
         sendJSON(res, 200, await communityRoutes.createCommunityCheckout(account, baseUrl)); return;
       }
+    }
+
+    // ---- /api/community/notifications ----
+    if (parts[1] === "community" && parts[2] === "notifications") {
+      const author = communityRoutes.requireAnyAuth(req);
+      if (parts.length === 3 && req.method === "GET") {
+        sendJSON(res, 200, await communityRoutes.listNotifications(author)); return;
+      }
+      if (parts.length === 4 && parts[3] === "read" && req.method === "POST") {
+        sendJSON(res, 200, await communityRoutes.marcarNotificacionesLeidas(author)); return;
+      }
+    }
+
+    // ---- /api/community/reports y /api/community/block ----
+    if (parts[1] === "community" && parts[2] === "reports" && req.method === "POST") {
+      const author = communityRoutes.requireAnyAuth(req);
+      const body = await readJSONBody(req);
+      sendJSON(res, 201, await communityRoutes.crearReporte(author, body)); return;
+    }
+    if (parts[1] === "community" && parts[2] === "block" && req.method === "POST") {
+      const author = communityRoutes.requireAnyAuth(req);
+      const body = await readJSONBody(req);
+      sendJSON(res, 200, await communityRoutes.toggleBlock(author, body.type, body.id)); return;
     }
 
     // ---- /api/media/:id -- sirve el archivo real (foto o video) que se
