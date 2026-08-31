@@ -362,12 +362,18 @@ function conFotoAutor(p) {
 // Insignias por aportes -- puntaje ponderado (un posteo pesa más que
 // un comentario, que a su vez pesa más que una reacción recibida sola),
 // con niveles que se van desbloqueando solos, sin que nadie los asigne
-// a mano.
+// a mano. Los siete niveles siguen el orden caldeo -- el orden
+// astrológico clásico de los planetas, de más rápido/cercano (la Luna)
+// a más lento/lejano (Saturno), que tradicionalmente representa una
+// escala real de peso e influencia, no solo un ranking arbitrario.
 const NIVELES_APORTE = [
-  { min: 0, nombre: "Nuevo", color: "#8A8577" },
-  { min: 10, nombre: "Activo", color: "#4F7FBF" },
-  { min: 50, nombre: "Referente", color: "#9C7A3C" },
-  { min: 150, nombre: "Leyenda", color: "#C24E7A" },
+  { min: 0,   nombre: "Luna",     glifo: "☽", color: "#A8ADBD" },
+  { min: 15,  nombre: "Mercurio", glifo: "☿", color: "#7A8B99" },
+  { min: 40,  nombre: "Venus",    glifo: "♀", color: "#C98BA0" },
+  { min: 80,  nombre: "Sol",      glifo: "☉", color: "#B8863B" },
+  { min: 150, nombre: "Marte",    glifo: "♂", color: "#A8432A" },
+  { min: 300, nombre: "Júpiter",  glifo: "♃", color: "#7B5EA7" },
+  { min: 600, nombre: "Saturno",  glifo: "♄", color: "#4A4438" },
 ];
 
 function calcularAportes(type, id) {
@@ -379,7 +385,17 @@ function calcularAportes(type, id) {
   const puntaje = posts * 3 + comentarios * 1 + reaccionesRecibidas * 1;
   let nivel = NIVELES_APORTE[0];
   NIVELES_APORTE.forEach(n => { if (puntaje >= n.min) nivel = n; });
-  return { totalAportes: posts + comentarios, puntaje, nivel: nivel.nombre, nivelColor: nivel.color };
+  const idx = NIVELES_APORTE.indexOf(nivel);
+  const siguiente = NIVELES_APORTE[idx + 1] || null;
+  return {
+    totalAportes: posts + comentarios, puntaje,
+    nivel: nivel.nombre, nivelColor: nivel.color, nivelGlifo: nivel.glifo,
+    // Cuánto falta para el próximo nivel -- null si ya está en el
+    // último (Saturno), para que el frontend pueda mostrar una barra
+    // de progreso real, no solo el nombre del nivel actual.
+    siguienteNivel: siguiente ? siguiente.nombre : null,
+    puntosParaSiguiente: siguiente ? siguiente.min - puntaje : null,
+  };
 }
 
 export async function getProfile(req, type, id) {
