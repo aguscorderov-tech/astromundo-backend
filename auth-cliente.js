@@ -44,6 +44,8 @@ export function publicClientAccount(account) {
     date: account.date, time: account.time, timeUnknown: !!account.time_unknown,
     place: account.place, lat: account.lat, lng: account.lng, tz: account.tz, tzName: account.tz_name,
     notificationPref: account.notification_pref, createdAt: account.created_at,
+    bio: account.bio, photoUrl: account.photo_url,
+    codigoReferido: account.codigo_referido,
   };
 }
 
