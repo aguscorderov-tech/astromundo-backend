@@ -6,5 +6,8 @@
   "scripts": {
     "start": "node server.js"
   },
+  "dependencies": {
+    "nodemailer": "^6.9.0"
+  },
   "description": "Backend de Astromundo — cero dependencias externas (usa node:http y node:sqlite nativos)."
 }
