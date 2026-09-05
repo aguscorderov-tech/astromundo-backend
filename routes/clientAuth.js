@@ -10,6 +10,7 @@ import {
   buscarFichasCoincidentesPorEmail, confirmarVinculo,
 } from "../auth-cliente.js";
 import { HttpError } from "../http-utils.js";
+import { notificarNuevoRegistro } from "../notifyOwner.js";
 
 export async function registerClient(body) {
   const { email, password, name, date, time, timeUnknown, place, lat, lng, tz, tzName, codigoReferido } = body;
@@ -49,6 +50,7 @@ export async function registerClient(body) {
 
   const token = createClientSession(id);
   const account = db.prepare("SELECT * FROM client_accounts WHERE id = ?").get(id);
+  notificarNuevoRegistro(account);
   return { token, account: publicClientAccount(account), fichasSugeridas };
 }
 
