@@ -9,9 +9,9 @@ import { db, newId } from "../db.js";
 import { HttpError } from "../http-utils.js";
 import * as mp from "../providers/mercadopago.js";
 
-// Mismos precios que ya se mostraban en el panel de Pagos — en centavos,
+// Mismos precios que se muestran en el panel de Pagos — en centavos,
 // mismo criterio que el resto de la plataforma (price_cents / 100 = pesos).
-export const PLAN_PRICES = { pro: 3000000, premium: 6800000 };
+export const PLAN_PRICES = { pro: 1600000, premium: 2800000 };
 
 export function ownerCredentials() {
   const accessToken = process.env.OWNER_MP_ACCESS_TOKEN;
