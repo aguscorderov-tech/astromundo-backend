@@ -12,6 +12,7 @@ import * as authRoutes from "./routes/auth.js";
 import * as clientAuthRoutes from "./routes/clientAuth.js";
 import * as communityRoutes from "./routes/community.js";
 import * as clientRoutes from "./routes/clients.js";
+import * as familyRoutes from "./routes/familyTrees.js";
 import * as chartRoutes from "./routes/charts.js";
 import * as serviceRoutes from "./routes/services.js";
 import * as apptRoutes from "./routes/appointments.js";
