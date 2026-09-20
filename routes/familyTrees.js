@@ -1,126 +1,117 @@
-const express = require("express");
-const router = express.Router();
-const crypto = require("crypto");
-// Reemplazá esto por tu conexión real (la misma que usa routes/clients.js)
-const db = require("../db");
-// Reemplazá esto por tu middleware real de autenticación (el que ya
-// protege /clients y /charts — probablemente lee el Bearer token y
-// pone req.user)
-const requireAuth = require("../middleware/requireAuth");
-
-router.use(requireAuth);
-
-function newId() { return crypto.randomUUID(); }
+// routes/familyTrees.js
+import { db, newId } from "../db.js";
+import { HttpError } from "../http-utils.js";
 
 // ---- Árboles ----
 
-router.get("/family-trees", (req, res) => {
-  const rows = db.prepare("SELECT * FROM family_trees WHERE user_id = ? ORDER BY created_at DESC").all(req.user.id);
-  res.json(rows);
-});
+export function listFamilyTrees(user) {
+  return db.prepare("SELECT * FROM family_trees WHERE user_id = ? ORDER BY created_at DESC").all(user.id);
+}
 
-router.post("/family-trees", (req, res) => {
-  const { name } = req.body;
-  if (!name) return res.status(400).json({ error: "Falta el nombre del árbol." });
-  const id = newId();
-  db.prepare("INSERT INTO family_trees (id, user_id, name) VALUES (?, ?, ?)").run(id, req.user.id, name);
-  const row = db.prepare("SELECT * FROM family_trees WHERE id = ?").get(id);
-  res.status(201).json(row);
-});
+export function createFamilyTree(user, body) {
+  if (!body.name) throw new HttpError(400, "El árbol necesita un nombre.");
+  const id = newId("ft");
+  db.prepare("INSERT INTO family_trees (id, user_id, name) VALUES (?, ?, ?)").run(id, user.id, body.name);
+  return db.prepare("SELECT * FROM family_trees WHERE id = ?").get(id);
+}
 
-router.put("/family-trees/:id", (req, res) => {
-  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
-  if (!tree) return res.status(404).json({ error: "Árbol no encontrado." });
-  db.prepare("UPDATE family_trees SET name = ? WHERE id = ?").run(req.body.name, req.params.id);
-  res.json(db.prepare("SELECT * FROM family_trees WHERE id = ?").get(req.params.id));
-});
+export function renameFamilyTree(user, treeId, body) {
+  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(treeId, user.id);
+  if (!tree) throw new HttpError(404, "Árbol no encontrado.");
+  db.prepare("UPDATE family_trees SET name = ? WHERE id = ?").run(body.name, treeId);
+  return db.prepare("SELECT * FROM family_trees WHERE id = ?").get(treeId);
+}
 
-router.delete("/family-trees/:id", (req, res) => {
-  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
-  if (!tree) return res.status(404).json({ error: "Árbol no encontrado." });
-  db.prepare("DELETE FROM family_trees WHERE id = ?").run(req.params.id); // los nodos y relaciones se borran solos por el ON DELETE CASCADE
-  res.status(204).end();
-});
+export function deleteFamilyTree(user, treeId) {
+  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(treeId, user.id);
+  if (!tree) throw new HttpError(404, "Árbol no encontrado.");
+  db.prepare("DELETE FROM family_trees WHERE id = ?").run(treeId); // nodos y relaciones se borran solos (ON DELETE CASCADE)
+  return { ok: true };
+}
 
-// Devuelve el árbol completo: datos del árbol + todos sus nodos + todas sus relaciones
-router.get("/family-trees/:id", (req, res) => {
-  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
-  if (!tree) return res.status(404).json({ error: "Árbol no encontrado." });
-  const nodes = db.prepare("SELECT * FROM family_nodes WHERE tree_id = ?").all(req.params.id);
-  const relations = db.prepare("SELECT * FROM family_relations WHERE tree_id = ?").all(req.params.id);
-  res.json({ ...tree, nodes, relations });
-});
+export function getFamilyTree(user, treeId) {
+  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(treeId, user.id);
+  if (!tree) throw new HttpError(404, "Árbol no encontrado.");
+  const nodes = db.prepare("SELECT * FROM family_nodes WHERE tree_id = ?").all(treeId);
+  const relations = db.prepare("SELECT * FROM family_relations WHERE tree_id = ?").all(treeId);
+  return { ...tree, nodes, relations };
+}
 
 // ---- Nodos (personas del árbol) ----
 
-router.post("/family-trees/:id/nodes", (req, res) => {
-  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
-  if (!tree) return res.status(404).json({ error: "Árbol no encontrado." });
-  const b = req.body;
-  if (!b.name) return res.status(400).json({ error: "Falta el nombre de la persona." });
-  const id = newId();
+export function createFamilyNode(user, treeId, body) {
+  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(treeId, user.id);
+  if (!tree) throw new HttpError(404, "Árbol no encontrado.");
+  if (!body.name) throw new HttpError(400, "La persona necesita un nombre.");
+  const id = newId("fn");
   db.prepare(`INSERT INTO family_nodes
     (id, tree_id, client_id, name, date, time, time_unknown, place, lat, lng, tz, tz_name, gender, deceased, death_date, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, req.params.id, b.clientId || null, b.name, b.date || null, b.time || null, b.timeUnknown ? 1 : 0,
-        b.place || null, b.lat ?? null, b.lng ?? null, b.tz || null, b.tzName || null, b.gender || null,
-        b.deceased ? 1 : 0, b.deathDate || null, b.notes || null);
-  res.status(201).json(db.prepare("SELECT * FROM family_nodes WHERE id = ?").get(id));
-});
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    id, treeId, body.clientId || null, body.name, body.date || null, body.time || null,
+    body.timeUnknown ? 1 : 0, body.place || null, body.lat ?? null, body.lng ?? null,
+    body.tz || null, body.tzName || null, body.gender || null,
+    body.deceased ? 1 : 0, body.deathDate || null, body.notes || null
+  );
+  return db.prepare("SELECT * FROM family_nodes WHERE id = ?").get(id);
+}
 
-router.put("/family-nodes/:id", (req, res) => {
-  const node = db.prepare(
+export function updateFamilyNode(user, nodeId, body) {
+  const existing = db.prepare(
     `SELECT family_nodes.* FROM family_nodes
      JOIN family_trees ON family_trees.id = family_nodes.tree_id
      WHERE family_nodes.id = ? AND family_trees.user_id = ?`
-  ).get(req.params.id, req.user.id);
-  if (!node) return res.status(404).json({ error: "Persona no encontrada." });
-  const b = req.body;
+  ).get(nodeId, user.id);
+  if (!existing) throw new HttpError(404, "Persona no encontrada.");
+  const merged = { ...existing, ...body };
   db.prepare(`UPDATE family_nodes SET
-    client_id = ?, name = ?, date = ?, time = ?, time_unknown = ?, place = ?, lat = ?, lng = ?,
-    tz = ?, tz_name = ?, gender = ?, deceased = ?, death_date = ?, notes = ?
-    WHERE id = ?`
-  ).run(b.clientId || null, b.name, b.date || null, b.time || null, b.timeUnknown ? 1 : 0,
-        b.place || null, b.lat ?? null, b.lng ?? null, b.tz || null, b.tzName || null, b.gender || null,
-        b.deceased ? 1 : 0, b.deathDate || null, b.notes || null, req.params.id);
-  res.json(db.prepare("SELECT * FROM family_nodes WHERE id = ?").get(req.params.id));
-});
+    client_id=?, name=?, date=?, time=?, time_unknown=?, place=?, lat=?, lng=?, tz=?, tz_name=?, gender=?, deceased=?, death_date=?, notes=?
+    WHERE id=?`).run(
+    merged.clientId ?? existing.client_id ?? null,
+    merged.name, merged.date ?? null, merged.time ?? null,
+    (body.timeUnknown !== undefined ? body.timeUnknown : existing.time_unknown) ? 1 : 0,
+    merged.place ?? null, merged.lat ?? null, merged.lng ?? null, merged.tz ?? null,
+    merged.tzName ?? existing.tz_name ?? null, merged.gender ?? existing.gender ?? null,
+    (body.deceased !== undefined ? body.deceased : existing.deceased) ? 1 : 0,
+    merged.deathDate ?? existing.death_date ?? null,
+    body.notes !== undefined ? body.notes : (existing.notes || null),
+    nodeId
+  );
+  return db.prepare("SELECT * FROM family_nodes WHERE id = ?").get(nodeId);
+}
 
-router.delete("/family-nodes/:id", (req, res) => {
-  const node = db.prepare(
+export function deleteFamilyNode(user, nodeId) {
+  const existing = db.prepare(
     `SELECT family_nodes.* FROM family_nodes
      JOIN family_trees ON family_trees.id = family_nodes.tree_id
      WHERE family_nodes.id = ? AND family_trees.user_id = ?`
-  ).get(req.params.id, req.user.id);
-  if (!node) return res.status(404).json({ error: "Persona no encontrada." });
-  db.prepare("DELETE FROM family_nodes WHERE id = ?").run(req.params.id); // las relaciones que la mencionan se borran solas (ON DELETE CASCADE)
-  res.status(204).end();
-});
+  ).get(nodeId, user.id);
+  if (!existing) throw new HttpError(404, "Persona no encontrada.");
+  db.prepare("DELETE FROM family_nodes WHERE id = ?").run(nodeId); // las relaciones que la mencionan se borran solas
+  return { ok: true };
+}
 
 // ---- Relaciones (vínculos entre dos personas) ----
 
-router.post("/family-trees/:id/relations", (req, res) => {
-  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id);
-  if (!tree) return res.status(404).json({ error: "Árbol no encontrado." });
-  const { nodeId, relatedNodeId, type } = req.body;
+export function createFamilyRelation(user, treeId, body) {
+  const tree = db.prepare("SELECT * FROM family_trees WHERE id = ? AND user_id = ?").get(treeId, user.id);
+  if (!tree) throw new HttpError(404, "Árbol no encontrado.");
+  const { nodeId, relatedNodeId, type } = body;
   if (!nodeId || !relatedNodeId || !["padre", "madre", "pareja"].includes(type)) {
-    return res.status(400).json({ error: "Faltan datos del vínculo." });
+    throw new HttpError(400, "Faltan datos del vínculo.");
   }
-  const id = newId();
-  db.prepare("INSERT INTO family_relations (id, tree_id, node_id, related_node_id, type) VALUES (?, ?, ?, ?, ?)")
-    .run(id, req.params.id, nodeId, relatedNodeId, type);
-  res.status(201).json(db.prepare("SELECT * FROM family_relations WHERE id = ?").get(id));
-});
+  const id = newId("fr");
+  db.prepare("INSERT INTO family_relations (id, tree_id, node_id, related_node_id, type) VALUES (?,?,?,?,?)")
+    .run(id, treeId, nodeId, relatedNodeId, type);
+  return db.prepare("SELECT * FROM family_relations WHERE id = ?").get(id);
+}
 
-router.delete("/family-relations/:id", (req, res) => {
-  const rel = db.prepare(
+export function deleteFamilyRelation(user, relationId) {
+  const existing = db.prepare(
     `SELECT family_relations.* FROM family_relations
      JOIN family_trees ON family_trees.id = family_relations.tree_id
      WHERE family_relations.id = ? AND family_trees.user_id = ?`
-  ).get(req.params.id, req.user.id);
-  if (!rel) return res.status(404).json({ error: "Vínculo no encontrado." });
-  db.prepare("DELETE FROM family_relations WHERE id = ?").run(req.params.id);
-  res.status(204).end();
-});
-
-module.exports = router;
+  ).get(relationId, user.id);
+  if (!existing) throw new HttpError(404, "Vínculo no encontrado.");
+  db.prepare("DELETE FROM family_relations WHERE id = ?").run(relationId);
+  return { ok: true };
+}
