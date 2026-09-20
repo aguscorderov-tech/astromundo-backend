@@ -430,18 +430,11 @@ CREATE TABLE IF NOT EXISTS community_follows (
   PRIMARY KEY (follower_type, follower_id, followed_type, followed_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
-CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
-CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
-CREATE INDEX IF NOT EXISTS idx_appt_user ON appointments(user_id);
-CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
-CREATE INDEX IF NOT EXISTS idx_follows_followed ON community_follows(followed_type, followed_id);
-CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
-CREATE INDEX IF NOT EXISTS idx_community_posts_space ON community_posts(space);
-CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(post_id);
-CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
-CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
-CREATE INDEX IF NOT EXISTS idx_platform_subs_user ON platform_subscriptions(user_id);
+-- Astrogenealogía -- árbol familiar de un cliente/consultante. Un árbol
+-- (family_trees) contiene personas (family_nodes, opcionalmente ligadas a
+-- un cliente ya cargado vía client_id) y vínculos entre ellas
+-- (family_relations: padre/madre/pareja). El resto del parentesco
+-- (hermanos, abuelos, etc.) se deduce de esos vínculos, no se guarda.
 CREATE TABLE IF NOT EXISTS family_trees (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -474,13 +467,26 @@ CREATE TABLE IF NOT EXISTS family_relations (
   tree_id TEXT NOT NULL REFERENCES family_trees(id) ON DELETE CASCADE,
   node_id TEXT NOT NULL REFERENCES family_nodes(id) ON DELETE CASCADE,
   related_node_id TEXT NOT NULL REFERENCES family_nodes(id) ON DELETE CASCADE,
-  type TEXT NOT NULL,
+  type TEXT NOT NULL, -- 'padre' | 'madre' | 'pareja'
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-
 CREATE INDEX IF NOT EXISTS idx_family_trees_user ON family_trees(user_id);
 CREATE INDEX IF NOT EXISTS idx_family_nodes_tree ON family_nodes(tree_id);
 CREATE INDEX IF NOT EXISTS idx_family_relations_tree ON family_relations(tree_id);
+
+CREATE INDEX IF NOT EXISTS idx_clients_user ON clients(user_id);
+CREATE INDEX IF NOT EXISTS idx_charts_user ON charts(user_id);
+CREATE INDEX IF NOT EXISTS idx_charts_client ON charts(client_id);
+CREATE INDEX IF NOT EXISTS idx_appt_user ON appointments(user_id);
+CREATE INDEX IF NOT EXISTS idx_services_user ON services(user_id);
+CREATE INDEX IF NOT EXISTS idx_follows_followed ON community_follows(followed_type, followed_id);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_community_posts_space ON community_posts(space);
+CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
+CREATE INDEX IF NOT EXISTS idx_platform_subs_user ON platform_subscriptions(user_id);
+
 `);
 
 // "CREATE TABLE IF NOT EXISTS" no le agrega columnas nuevas a una tabla que
