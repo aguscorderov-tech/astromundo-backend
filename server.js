@@ -421,7 +421,30 @@ const server = createServer(async (req, res) => {
       if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, clientRoutes.createClient(user, await readJSONBody(req))); return; }
       if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, clientRoutes.updateClient(user, parts[2], await readJSONBody(req))); return; }
     }
+    // ---- /api/family-trees ----
+    if (parts[1] === "family-trees") {
+      const user = requireAuth(req);
+      if (parts.length === 2 && req.method === "GET") { sendJSON(res, 200, familyRoutes.listFamilyTrees(user)); return; }
+      if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, familyRoutes.createFamilyTree(user, await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "GET") { sendJSON(res, 200, familyRoutes.getFamilyTree(user, parts[2])); return; }
+      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, familyRoutes.renameFamilyTree(user, parts[2], await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, familyRoutes.deleteFamilyTree(user, parts[2])); return; }
+      if (parts.length === 4 && parts[3] === "nodes" && req.method === "POST") { sendJSON(res, 201, familyRoutes.createFamilyNode(user, parts[2], await readJSONBody(req))); return; }
+      if (parts.length === 4 && parts[3] === "relations" && req.method === "POST") { sendJSON(res, 201, familyRoutes.createFamilyRelation(user, parts[2], await readJSONBody(req))); return; }
+    }
 
+    // ---- /api/family-nodes/:id ----
+    if (parts[1] === "family-nodes") {
+      const user = requireAuth(req);
+      if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, familyRoutes.updateFamilyNode(user, parts[2], await readJSONBody(req))); return; }
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, familyRoutes.deleteFamilyNode(user, parts[2])); return; }
+    }
+
+    // ---- /api/family-relations/:id ----
+    if (parts[1] === "family-relations") {
+      const user = requireAuth(req);
+      if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, familyRoutes.deleteFamilyRelation(user, parts[2])); return; }
+    }
     // ---- /api/charts ----
     if (parts[1] === "charts") {
       const user = requireAuth(req);
