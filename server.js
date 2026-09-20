@@ -421,6 +421,7 @@ const server = createServer(async (req, res) => {
       if (parts.length === 2 && req.method === "POST") { sendJSON(res, 201, clientRoutes.createClient(user, await readJSONBody(req))); return; }
       if (parts.length === 3 && req.method === "PUT") { sendJSON(res, 200, clientRoutes.updateClient(user, parts[2], await readJSONBody(req))); return; }
     }
+
     // ---- /api/family-trees ----
     if (parts[1] === "family-trees") {
       const user = requireAuth(req);
@@ -445,6 +446,7 @@ const server = createServer(async (req, res) => {
       const user = requireAuth(req);
       if (parts.length === 3 && req.method === "DELETE") { sendJSON(res, 200, familyRoutes.deleteFamilyRelation(user, parts[2])); return; }
     }
+
     // ---- /api/charts ----
     if (parts[1] === "charts") {
       const user = requireAuth(req);
