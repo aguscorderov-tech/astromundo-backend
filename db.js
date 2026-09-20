@@ -442,7 +442,45 @@ CREATE INDEX IF NOT EXISTS idx_community_comments_post ON community_comments(pos
 CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_synastries_user ON synastries(user_id);
 CREATE INDEX IF NOT EXISTS idx_platform_subs_user ON platform_subscriptions(user_id);
+CREATE TABLE IF NOT EXISTS family_trees (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
+CREATE TABLE IF NOT EXISTS family_nodes (
+  id TEXT PRIMARY KEY,
+  tree_id TEXT NOT NULL REFERENCES family_trees(id) ON DELETE CASCADE,
+  client_id TEXT REFERENCES clients(id) ON DELETE SET NULL,
+  name TEXT NOT NULL,
+  date TEXT,
+  time TEXT,
+  time_unknown INTEGER NOT NULL DEFAULT 0,
+  place TEXT,
+  lat REAL,
+  lng REAL,
+  tz TEXT,
+  tz_name TEXT,
+  gender TEXT,
+  deceased INTEGER NOT NULL DEFAULT 0,
+  death_date TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS family_relations (
+  id TEXT PRIMARY KEY,
+  tree_id TEXT NOT NULL REFERENCES family_trees(id) ON DELETE CASCADE,
+  node_id TEXT NOT NULL REFERENCES family_nodes(id) ON DELETE CASCADE,
+  related_node_id TEXT NOT NULL REFERENCES family_nodes(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_family_trees_user ON family_trees(user_id);
+CREATE INDEX IF NOT EXISTS idx_family_nodes_tree ON family_nodes(tree_id);
+CREATE INDEX IF NOT EXISTS idx_family_relations_tree ON family_relations(tree_id);
 `);
 
 // "CREATE TABLE IF NOT EXISTS" no le agrega columnas nuevas a una tabla que
